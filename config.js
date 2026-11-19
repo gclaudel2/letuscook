@@ -5,7 +5,7 @@
  */
 window.ZBC_CONFIG = {
   // Adresse de votre relais Cloudflare (celle qui se termine par .workers.dev)
-  WORKER_URL: "https://zbc-relais.VOTRE-COMPTE.workers.dev",
+  WORKER_URL: "https://green-tooth-f612.guillaume-claudel.workers.dev",
 
   // Code d'accès du relais. Laissez "" si vous avez supprimé ACCESS_CODE sur Cloudflare.
   // S'il est rempli ici, il devient visible de tous : ce n'est plus vraiment un secret.
