@@ -1,0 +1,869 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Zéro Blabla Cuisine</title>
+<meta name="description" content="La recette. Rien que la recette : sans pub ni blabla, en mode cuisine.">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Zéro Blabla">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#FAF6EF" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#12100E" media="(prefers-color-scheme: dark)">
+<meta name="format-detection" content="telephone=no">
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #FAF6EF;
+    --surface: #FFFFFF;
+    --ink: #1B1714;
+    --muted: #6A6159;
+    --line: #E6DDD0;
+    --accent: #C2410C;
+    --accent-ink: #FFFFFF;
+    --accent-soft: #FCE7D9;
+    --done: #8A8178;
+    --danger: #B42318;
+    --radius: 18px;
+    --serif: ui-serif, "New York", "Iowan Old Style", Georgia, serif;
+    --sans: -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, sans-serif;
+    --rounded: ui-rounded, "SF Pro Rounded", -apple-system, system-ui, sans-serif;
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12100E;
+      --surface: #1C1916;
+      --ink: #F4EEE6;
+      --muted: #A99F94;
+      --line: #322C26;
+      --accent: #FF8A4C;
+      --accent-ink: #1A0E06;
+      --accent-soft: #3A2317;
+      --done: #7C7369;
+      --danger: #FF7A70;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 18px/1.5 var(--sans);
+    -webkit-tap-highlight-color: transparent;
+    padding-bottom: calc(32px + var(--safe-bottom));
+  }
+  button, input { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  a { color: var(--accent); }
+  :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .wrap { max-width: 680px; margin: 0 auto; padding: 0 20px; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+  /* ── Barre du haut ─────────────────────────────── */
+  .topbar {
+    position: sticky; top: 0; z-index: 10;
+    padding-top: var(--safe-top);
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    -webkit-backdrop-filter: saturate(1.4) blur(14px);
+    backdrop-filter: saturate(1.4) blur(14px);
+    border-bottom: 1px solid transparent;
+  }
+  .topbar.scrolled { border-bottom-color: var(--line); }
+  .topbar .wrap { display: flex; align-items: center; gap: 8px; min-height: 56px; }
+  .topbar .spacer { flex: 1; }
+  .icon-btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    min-width: 44px; height: 44px; padding: 0 12px;
+    border: 0; border-radius: 999px; background: transparent;
+    font-size: 16px; font-weight: 600; white-space: nowrap;
+  }
+  .icon-btn:active { background: var(--line); }
+  .icon-btn svg { width: 22px; height: 22px; flex: none; }
+  .icon-btn.on { background: var(--accent); color: var(--accent-ink); }
+  .mini-brand { font: 700 17px/1 var(--serif); letter-spacing: -0.01em; }
+
+  /* ── Accueil ───────────────────────────────────── */
+  .hero { padding: 28px 0 22px; }
+  .brand { margin: 0; font: 800 clamp(38px, 11vw, 54px)/0.95 var(--serif); letter-spacing: -0.03em; }
+  .brand .strike { position: relative; color: var(--muted); font-weight: 500; font-style: italic; }
+  .brand .strike::after {
+    content: ""; position: absolute; left: -4%; right: -4%; top: 54%;
+    height: 0.09em; background: var(--accent); border-radius: 2px; transform: rotate(-4deg);
+  }
+  .brand .accent { color: var(--accent); }
+  .tagline { margin: 12px 0 0; color: var(--muted); font-size: 17px; }
+
+  .tabs { display: flex; gap: 6px; padding: 5px; border-radius: 999px; background: var(--line); margin-bottom: 22px; }
+  .tab {
+    flex: 1; height: 44px; border: 0; border-radius: 999px; background: transparent;
+    font-weight: 650; font-size: 16px; color: var(--muted);
+  }
+  .tab[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px rgb(0 0 0 / 0.12); }
+  .tab .count { font-variant-numeric: tabular-nums; opacity: 0.7; }
+
+  .field-label { display: block; font-weight: 650; margin-bottom: 8px; }
+  .url-row { display: flex; gap: 8px; }
+  .input {
+    width: 100%; min-width: 0; height: 56px; padding: 0 16px;
+    border: 2px solid var(--line); border-radius: 14px; background: var(--surface);
+    font-size: 17px;
+  }
+  .input:focus { border-color: var(--accent); outline: none; }
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+    height: 56px; padding: 0 20px; border-radius: 14px;
+    border: 2px solid var(--line); background: var(--surface); font-weight: 650; font-size: 17px;
+  }
+  .btn:active { transform: scale(0.98); }
+  .btn svg { width: 24px; height: 24px; flex: none; }
+  .btn.primary { width: 100%; margin-top: 12px; border-color: var(--accent); background: var(--accent); color: var(--accent-ink); font-size: 18px; }
+  .btn.primary[disabled] { opacity: 0.75; }
+  .btn.ghost { border-color: transparent; background: transparent; color: var(--muted); }
+  .btn.danger { color: var(--danger); }
+  .hint { color: var(--muted); font-size: 15px; margin: 14px 2px 0; }
+
+  .notice { margin-top: 16px; padding: 14px 16px; border-radius: 14px; font-size: 16px; }
+  .notice.error { background: color-mix(in srgb, var(--danger) 13%, transparent); color: var(--ink); border-left: 4px solid var(--danger); }
+  .notice.warn { background: var(--accent-soft); border-left: 4px solid var(--accent); }
+
+  .spinner { width: 20px; height: 20px; border: 3px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Carnet ────────────────────────────────────── */
+  .search { margin-bottom: 16px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
+  .card {
+    display: flex; flex-direction: column; text-align: left; padding: 0; overflow: hidden;
+    border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);
+    color: inherit; text-decoration: none;
+  }
+  .card:active { transform: scale(0.98); }
+  .card .thumb { aspect-ratio: 4 / 3; background: var(--accent-soft); display: grid; place-items: center; overflow: hidden; }
+  .card .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .card .thumb .initial { font: 700 40px/1 var(--serif); color: var(--accent); }
+  .card .body { padding: 10px 12px 12px; }
+  .card h3 { margin: 0; font: 650 16px/1.25 var(--sans); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .card .meta { margin-top: 4px; font-size: 13px; color: var(--muted); }
+  .empty { text-align: center; color: var(--muted); padding: 40px 10px; }
+  .empty strong { display: block; color: var(--ink); font: 700 22px/1.2 var(--serif); margin-bottom: 6px; }
+
+  /* ── Recette / mode cuisine ────────────────────── */
+  .r-image { margin: 4px 0 18px; border-radius: var(--radius); overflow: hidden; aspect-ratio: 16 / 10; background: var(--accent-soft); }
+  .r-image img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .r-title { margin: 6px 0 12px; font: 800 clamp(30px, 8.5vw, 42px)/1.05 var(--serif); letter-spacing: -0.02em; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+  .chip { padding: 6px 12px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); font-size: 15px; }
+  .chip b { font-variant-numeric: tabular-nums; }
+  .source { display: inline-block; margin-top: 12px; font-size: 14px; color: var(--muted); text-decoration: none; }
+  .source span { text-decoration: underline; text-underline-offset: 3px; }
+
+  .servings {
+    display: flex; align-items: center; gap: 12px; margin: 24px 0 8px; padding: 10px;
+    border-radius: var(--radius); background: var(--surface); border: 1px solid var(--line);
+  }
+  .servings .stepper {
+    width: 56px; height: 56px; flex: none; border-radius: 50%;
+    border: 0; background: var(--accent-soft); color: var(--accent);
+    font: 700 30px/1 var(--rounded);
+  }
+  .servings .stepper:disabled { opacity: 0.35; }
+  .servings .value { flex: 1; text-align: center; }
+  .servings .value strong { display: block; font: 800 30px/1 var(--rounded); font-variant-numeric: tabular-nums; }
+  .servings .value small { color: var(--muted); font-size: 14px; }
+  .servings-reset { display: block; margin: 0 auto 6px; border: 0; background: none; color: var(--accent); font-size: 15px; padding: 8px; }
+
+  .section-title { display: flex; align-items: baseline; justify-content: space-between; margin: 30px 0 10px; }
+  .section-title h2 { margin: 0; font: 800 26px/1.1 var(--serif); letter-spacing: -0.01em; }
+  .section-title .progress { color: var(--muted); font-size: 15px; font-variant-numeric: tabular-nums; }
+  .sub { margin: 22px 0 8px; font: 700 15px/1.3 var(--sans); text-transform: uppercase; letter-spacing: 0.06em; color: var(--accent); }
+
+  .ingredients { list-style: none; margin: 0; padding: 0; }
+  .ingredients li + li { border-top: 1px solid var(--line); }
+  .ing { display: flex; align-items: flex-start; gap: 14px; padding: 13px 4px; cursor: pointer; }
+  .ing input { position: absolute; opacity: 0; pointer-events: none; }
+  .ing .box {
+    flex: none; width: 28px; height: 28px; margin-top: 1px; border-radius: 9px;
+    border: 2.5px solid var(--line); display: grid; place-items: center; transition: background 0.15s, border-color 0.15s;
+  }
+  .ing .box svg { width: 18px; height: 18px; opacity: 0; color: var(--accent-ink); }
+  .ing input:checked + .box { background: var(--accent); border-color: var(--accent); }
+  .ing input:checked + .box svg { opacity: 1; }
+  .ing input:focus-visible + .box { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .ing .txt { font-size: 19px; line-height: 1.4; }
+  .ing .qty { font-weight: 750; font-variant-numeric: tabular-nums; }
+  .ing input:checked ~ .txt { color: var(--done); text-decoration: line-through; text-decoration-thickness: 2px; }
+
+  .steps { list-style: none; margin: 0; padding: 0; }
+  .step {
+    display: flex; gap: 16px; width: 100%; margin: 0 0 10px; padding: 16px 16px 16px 12px;
+    text-align: left; border: 2px solid transparent; border-radius: var(--radius); background: transparent;
+    transition: background 0.2s, border-color 0.2s, opacity 0.2s;
+  }
+  .step .n {
+    flex: none; width: 40px; height: 40px; border-radius: 50%;
+    display: grid; place-items: center; background: var(--line);
+    font: 800 19px/1 var(--rounded); font-variant-numeric: tabular-nums;
+  }
+  .step .t { font-size: 21px; line-height: 1.6; padding-top: 4px; }
+  .step.done { opacity: 0.5; }
+  .step.active { background: var(--surface); border-color: var(--accent); opacity: 1; box-shadow: 0 6px 24px -10px color-mix(in srgb, var(--accent) 60%, transparent); }
+  .step.active .n { background: var(--accent); color: var(--accent-ink); }
+  .step-hint { color: var(--muted); font-size: 15px; margin: -2px 0 14px; }
+
+  .r-footer { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 30px; }
+
+  /* ── Divers ────────────────────────────────────── */
+  .toast {
+    position: fixed; left: 50%; bottom: calc(24px + var(--safe-bottom)); z-index: 50;
+    transform: translateX(-50%) translateY(20px); opacity: 0; pointer-events: none;
+    max-width: calc(100% - 40px); padding: 12px 18px; border-radius: 14px;
+    background: var(--ink); color: var(--bg); font-size: 16px; font-weight: 550;
+    transition: opacity 0.2s, transform 0.2s;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  dialog {
+    width: min(560px, calc(100% - 24px)); max-height: calc(100% - 40px); padding: 22px;
+    border: 0; border-radius: 22px; background: var(--bg); color: var(--ink);
+  }
+  dialog::backdrop { background: rgb(0 0 0 / 0.45); }
+  dialog h2 { margin: 0 0 4px; font: 800 26px/1.1 var(--serif); }
+  dialog .group { margin-top: 20px; }
+  dialog .group p { margin: 6px 0 0; color: var(--muted); font-size: 14px; }
+  dialog .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
+  dialog .actions .btn { flex: 1; }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation-duration: 0.01s !important; } }
+</style>
+</head>
+<body>
+<header class="topbar" id="topbar"><div class="wrap" id="toolbar"></div></header>
+<main class="wrap" id="app" tabindex="-1"></main>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<dialog id="settings" aria-labelledby="settings-title">
+  <form method="dialog" id="settings-form">
+    <h2 id="settings-title">Réglages</h2>
+    <div class="group">
+      <label class="field-label" for="set-worker">Adresse du relais</label>
+      <input class="input" id="set-worker" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://zbc-relais.….workers.dev">
+      <p>L'adresse donnée par Cloudflare quand vous avez déployé le relais.</p>
+    </div>
+    <div class="group">
+      <label class="field-label" for="set-code">Code d'accès</label>
+      <input class="input" id="set-code" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Le code ACCESS_CODE du relais">
+      <p>Laissez vide si vous n'avez pas défini de code sur le relais.</p>
+    </div>
+    <div class="group">
+      <span class="field-label">Mon carnet</span>
+      <div class="url-row">
+        <button type="button" class="btn" id="btn-export" style="flex:1">Exporter</button>
+        <button type="button" class="btn" id="btn-import" style="flex:1">Importer</button>
+        <input type="file" id="import-file" accept="application/json,.json" hidden>
+      </div>
+      <p id="storage-info">Vos recettes restent sur cet appareil. Exportez-les de temps en temps pour en garder une copie.</p>
+    </div>
+    <div class="actions">
+      <button class="btn ghost" value="cancel" formnovalidate>Annuler</button>
+      <button class="btn primary" value="save" style="margin-top:0">Enregistrer</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="extracteur.js"></script>
+<script>
+"use strict";
+
+/* ════════════ Utilitaires ════════════ */
+const $ = (sel, root = document) => root.querySelector(sel);
+
+/** Crée un élément. Le texte passe toujours par textContent : aucun HTML venant d'un site n'est interprété. */
+function h(tag, props, ...children) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(props || {})) {
+    if (v == null || v === false) continue;
+    if (k === "class") el.className = v;
+    else if (k === "text") el.textContent = v;
+    else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v === true ? "" : v);
+  }
+  for (const c of children.flat()) {
+    if (c == null || c === false) continue;
+    el.append(c instanceof Node ? c : String(c));
+  }
+  return el;
+}
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+const ICONS = {
+  back: "M15 18l-6-6 6-6",
+  gear: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z",
+  sun: "M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10zM12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4",
+  bookmark: "M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z",
+  check: "M20 6L9 17l-5-5",
+  paste: "M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2M9 2h6v4H9z",
+};
+function icon(name, filled = false) {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("fill", filled ? "currentColor" : "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", name === "check" ? "3.2" : "2");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS(SVG_NS, "path");
+  path.setAttribute("d", ICONS[name]);
+  svg.append(path);
+  return svg;
+}
+
+let toastTimer;
+function toast(message) {
+  const el = $("#toast");
+  el.textContent = message;
+  el.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove("show"), 2800);
+}
+
+function formatMinutes(min) {
+  if (min == null) return "";
+  if (min < 60) return `${min} min`;
+  const hours = Math.floor(min / 60), rest = min % 60;
+  if (hours >= 24) return `${Math.round(min / 1440)} j`;
+  return rest ? `${hours} h ${String(rest).padStart(2, "0")}` : `${hours} h`;
+}
+
+const safeHttpUrl = (u) => { try { const x = new URL(u); return /^https?:$/.test(x.protocol) ? x.toString() : null; } catch { return null; } };
+const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return ""; } };
+
+const store = {
+  get(key, fallback) { try { const v = localStorage.getItem(key); return v == null ? fallback : JSON.parse(v); } catch { return fallback; } },
+  set(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* plein ou indisponible */ } },
+  del(key) { try { localStorage.removeItem(key); } catch { /* */ } },
+};
+
+/* ════════════ Carnet (IndexedDB) ════════════ */
+const DB = (() => {
+  let opening;
+  const open = () => (opening ??= new Promise((resolve, reject) => {
+    const req = indexedDB.open("zero-blabla-cuisine", 1);
+    req.onupgradeneeded = () => req.result.createObjectStore("recettes", { keyPath: "id" });
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  }));
+  const run = async (mode, fn) => {
+    const db = await open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction("recettes", mode);
+      const req = fn(tx.objectStore("recettes"));
+      tx.oncomplete = () => resolve(req ? req.result : undefined);
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+  };
+  return {
+    all: () => run("readonly", (s) => s.getAll()),
+    put: (r) => run("readwrite", (s) => s.put(r)),
+    del: (id) => run("readwrite", (s) => s.delete(id)),
+  };
+})();
+
+const state = {
+  recipes: [],        // carnet, du plus récent au plus ancien
+  preview: null,      // recette extraite pas encore enregistrée
+  previewWarnings: [],
+  tab: "extraire",
+  query: "",
+  lastUrl: "",
+  lastError: "",
+  loading: false,
+};
+
+async function loadRecipes() {
+  try {
+    const all = await DB.all();
+    state.recipes = all.sort((a, b) => String(b.savedAt).localeCompare(String(a.savedAt)));
+  } catch (err) {
+    console.error(err);
+    toast("Impossible d'ouvrir le carnet sur cet appareil.");
+  }
+}
+
+const newId = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`);
+const findBySource = (url) => state.recipes.find((r) => r.sourceUrl === url);
+
+async function saveRecipe(recipe) {
+  const saved = { ...recipe, id: newId(), savedAt: new Date().toISOString() };
+  await DB.put(saved);
+  state.recipes.unshift(saved);
+  if (navigator.storage?.persist) navigator.storage.persist().catch(() => {}); // évite l'effacement automatique
+  return saved;
+}
+
+async function deleteRecipe(id) {
+  await DB.del(id);
+  state.recipes = state.recipes.filter((r) => r.id !== id);
+  store.del(`zbc.progress.${id}`);
+}
+
+/* ════════════ Écran allumé (Wake Lock) ════════════ */
+const Wake = {
+  supported: "wakeLock" in navigator,
+  wanted: false,
+  sentinel: null,
+  async enable() {
+    this.wanted = true;
+    try {
+      this.sentinel = await navigator.wakeLock.request("screen");
+      this.sentinel.addEventListener("release", () => { this.sentinel = null; refreshWakeButton(); });
+    } catch (err) {
+      this.wanted = false;
+      toast("L'écran ne peut pas rester allumé ici.");
+      console.warn(err);
+    }
+    refreshWakeButton();
+  },
+  async disable() {
+    this.wanted = false;
+    const s = this.sentinel;
+    this.sentinel = null;
+    if (s) await s.release().catch(() => {});
+    refreshWakeButton();
+  },
+};
+// iOS relâche le verrou quand l'appli passe en arrière-plan : on le reprend au retour
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && Wake.wanted && !Wake.sentinel) Wake.enable();
+});
+function refreshWakeButton() {
+  const btn = $("#btn-wake");
+  if (!btn) return;
+  const on = Wake.wanted;
+  btn.classList.toggle("on", on);
+  btn.setAttribute("aria-pressed", String(on));
+  btn.querySelector(".label").textContent = on ? "Allumé" : "Écran";
+  btn.setAttribute("aria-label", on ? "Écran maintenu allumé (toucher pour désactiver)" : "Garder l'écran allumé");
+}
+
+/* ════════════ Navigation ════════════ */
+function go(hash, replace = false) {
+  if (replace) history.replaceState(null, "", hash);
+  else if (location.hash !== hash) { location.hash = hash; return; }
+  route();
+}
+
+function route() {
+  const hash = location.hash || "#/";
+  const m = /^#\/r\/(.+)$/.exec(hash);
+  if (!m && hash !== "#/apercu" && Wake.wanted) Wake.disable(); // on quitte le mode cuisine
+  if (m) {
+    const recipe = state.recipes.find((r) => r.id === decodeURIComponent(m[1]));
+    return recipe ? renderRecipe(recipe, { saved: true }) : go("#/carnet", true);
+  }
+  if (hash === "#/apercu") {
+    return state.preview ? renderRecipe(state.preview, { saved: false }) : go("#/", true);
+  }
+  state.tab = hash === "#/carnet" ? "carnet" : "extraire";
+  renderHome();
+}
+
+function setView(toolbarItems, content) {
+  $("#toolbar").replaceChildren(...toolbarItems);
+  $("#app").replaceChildren(...content);
+  window.scrollTo(0, 0);
+}
+
+/* ════════════ Accueil ════════════ */
+function settingsButton() {
+  return h("button", { class: "icon-btn", "aria-label": "Réglages", onclick: openSettings }, icon("gear"));
+}
+
+function renderHome() {
+  const toolbar = [
+    h("span", { class: "spacer" }),
+    settingsButton(),
+  ];
+
+  const tabs = h("div", { class: "tabs", role: "tablist", "aria-label": "Sections" },
+    h("button", { class: "tab", role: "tab", "aria-selected": String(state.tab === "extraire"), onclick: () => go("#/") }, "Extraire"),
+    h("button", { class: "tab", role: "tab", "aria-selected": String(state.tab === "carnet"), onclick: () => go("#/carnet") },
+      "Mes recettes ", h("span", { class: "count" }, state.recipes.length ? `· ${state.recipes.length}` : "")),
+  );
+
+  const content = [
+    h("section", { class: "hero" },
+      h("h1", { class: "brand" }, "Zéro ", h("span", { class: "strike" }, "Blabla"), h("br"), h("span", { class: "accent" }, "Cuisine")),
+      h("p", { class: "tagline" }, "La recette. Rien que la recette."),
+    ),
+    tabs,
+    state.tab === "carnet" ? renderCarnet() : renderExtractPanel(),
+  ];
+  setView(toolbar, content);
+}
+
+function renderExtractPanel() {
+  const input = h("input", {
+    class: "input", id: "url", type: "url", inputmode: "url", autocomplete: "off", autocapitalize: "off",
+    spellcheck: "false", enterkeyhint: "go", placeholder: "https://…", value: state.lastUrl,
+  });
+  const submit = h("button", { class: "btn primary", type: "submit", disabled: state.loading },
+    state.loading ? [h("span", { class: "spinner", "aria-hidden": "true" }), "Extraction…"] : "Extraire la recette");
+
+  const canPaste = !!navigator.clipboard?.readText;
+  const form = h("form", { onsubmit: onExtract, novalidate: true },
+    h("label", { class: "field-label", for: "url" }, "Adresse de la recette"),
+    h("div", { class: "url-row" },
+      input,
+      canPaste && h("button", {
+        class: "btn", type: "button", "aria-label": "Coller l'adresse",
+        onclick: async () => {
+          try {
+            const text = await navigator.clipboard.readText();
+            if (text) { input.value = text.trim(); form.requestSubmit(); }
+          } catch { toast("Collez l'adresse dans le champ (appui long › Coller)."); }
+        },
+      }, icon("paste")),
+    ),
+    submit,
+  );
+
+  return h("section", { "aria-label": "Extraire une recette" },
+    form,
+    state.lastError && h("div", { class: "notice error", role: "alert" }, state.lastError),
+    h("p", { class: "hint" }, "Dans Safari : Partager › Copier, puis revenez ici et touchez le bouton Coller."),
+  );
+}
+
+async function onExtract(event) {
+  event.preventDefault();
+  if (state.loading) return;
+  const raw = $("#url").value;
+  state.lastUrl = raw;
+  state.lastError = "";
+
+  let url;
+  try { url = ZBC.parseTargetUrl(raw); } catch (err) { state.lastError = err.message; return renderHome(); }
+
+  const existing = findBySource(url);
+  if (existing) { toast("Déjà dans votre carnet"); return go(`#/r/${encodeURIComponent(existing.id)}`); }
+
+  state.loading = true;
+  renderHome();
+  try {
+    const { recipe, warnings } = await ZBC.extractRecipe(url);
+    state.preview = recipe;
+    state.previewWarnings = warnings;
+    state.lastUrl = "";
+    store.del("zbc.progress.apercu");
+    state.loading = false;
+    go("#/apercu");
+  } catch (err) {
+    state.loading = false;
+    state.lastError = err.message || "Échec de l'extraction.";
+    renderHome();
+    if (err.code === "NO_RELAY") openSettings();
+  }
+}
+
+function renderCarnet() {
+  if (!state.recipes.length) {
+    return h("div", { class: "empty" },
+      h("strong", {}, "Carnet vide"),
+      "Extrayez une recette puis touchez « Enregistrer » : elle restera disponible, même sans réseau.");
+  }
+  const q = state.query.trim().toLowerCase();
+  const list = q ? state.recipes.filter((r) => `${r.title} ${r.siteName || ""} ${r.ingredients.map((i) => i.name).join(" ")}`.toLowerCase().includes(q)) : state.recipes;
+
+  const cards = h("div", { class: "cards" }, list.map(recipeCard));
+  const search = state.recipes.length > 4 && h("input", {
+    class: "input search", type: "search", placeholder: "Rechercher (titre, ingrédient…)", value: state.query, "aria-label": "Rechercher",
+    oninput: (e) => {
+      state.query = e.target.value;
+      const ql = state.query.trim().toLowerCase();
+      const filtered = ql ? state.recipes.filter((r) => `${r.title} ${r.siteName || ""} ${r.ingredients.map((i) => i.name).join(" ")}`.toLowerCase().includes(ql)) : state.recipes;
+      cards.replaceChildren(...(filtered.length ? filtered.map(recipeCard) : [h("p", { class: "empty" }, "Aucune recette ne correspond.")]));
+    },
+  });
+  return h("section", { "aria-label": "Mes recettes" }, search, list.length ? cards : h("p", { class: "empty" }, "Aucune recette ne correspond."));
+}
+
+function recipeCard(r) {
+  const img = safeHttpUrl(r.image);
+  const thumb = h("div", { class: "thumb" }, h("span", { class: "initial", "aria-hidden": "true" }, (r.title || "?").trim().charAt(0).toUpperCase()));
+  if (img) {
+    const el = h("img", { src: img, alt: "", loading: "lazy", referrerpolicy: "no-referrer" });
+    el.addEventListener("load", () => thumb.replaceChildren(el));
+    el.addEventListener("error", () => el.remove());
+  }
+  const meta = [r.siteName, formatMinutes(r.totalTimeMin)].filter(Boolean).join(" · ");
+  return h("a", { class: "card", href: `#/r/${encodeURIComponent(r.id)}` },
+    thumb,
+    h("div", { class: "body" }, h("h3", {}, r.title), meta && h("div", { class: "meta" }, meta)),
+  );
+}
+
+/* ════════════ Mode cuisine ════════════ */
+const MULTIPLIERS = [0.5, 1, 1.5, 2, 3, 4];
+
+function quantityLabel(ing, factor) {
+  const metric = ["g", "kg", "mg", "ml", "cl", "dl", "l", "oz", "lb"].includes(ing.unit);
+  const fmt = (v) => (factor === 1 && metric ? String(Math.round(v * 1000) / 1000).replace(".", ",") : ZBC.formatQuantity(v * factor, ing.unit));
+  const q = fmt(ing.quantity);
+  const max = ing.quantityMax != null ? fmt(ing.quantityMax) : "";
+  return max && max !== q ? `${q}–${max}` : q;
+}
+
+function renderRecipe(recipe, { saved }) {
+  const progressKey = `zbc.progress.${saved ? recipe.id : "apercu"}`;
+  const progress = store.get(progressKey, {});
+  const checked = new Set(progress.checked || []);
+  let activeStep = Number.isInteger(progress.step) ? progress.step : -1;
+  const base = recipe.servings;
+  let servings = progress.servings ?? (base || 1);           // personnes, ou multiplicateur si base inconnue
+  const persist = () => store.set(progressKey, { checked: [...checked], step: activeStep, servings });
+
+  /* Barre du haut */
+  const toolbar = [
+    h("button", { class: "icon-btn", "aria-label": "Retour", onclick: () => go(saved ? "#/carnet" : "#/") }, icon("back")),
+    h("span", { class: "spacer" }),
+    Wake.supported && h("button", { class: "icon-btn", id: "btn-wake", "aria-pressed": "false", onclick: () => (Wake.wanted ? Wake.disable() : Wake.enable()) },
+      icon("sun"), h("span", { class: "label" }, "Écran")),
+    !saved && h("button", {
+      class: "icon-btn on", onclick: async (e) => {
+        e.currentTarget.disabled = true;
+        try {
+          const s = await saveRecipe(recipe);
+          const p = store.get("zbc.progress.apercu", null);
+          if (p) { store.set(`zbc.progress.${s.id}`, p); store.del("zbc.progress.apercu"); }
+          state.preview = null;
+          toast("Enregistrée dans votre carnet");
+          go(`#/r/${encodeURIComponent(s.id)}`, true);
+        } catch { e.currentTarget.disabled = false; toast("Enregistrement impossible."); }
+      },
+    }, icon("bookmark"), "Enregistrer"),
+  ];
+
+  /* En-tête */
+  const header = [];
+  const img = safeHttpUrl(recipe.image);
+  if (img) {
+    const figure = h("div", { class: "r-image" });
+    const el = h("img", { src: img, alt: "", referrerpolicy: "no-referrer" });
+    el.addEventListener("error", () => figure.remove());
+    figure.append(el);
+    header.push(figure);
+  }
+  header.push(h("h1", { class: "r-title" }, recipe.title));
+  const chips = [
+    recipe.prepTimeMin != null && ["Préparation", recipe.prepTimeMin],
+    recipe.cookTimeMin != null && ["Cuisson", recipe.cookTimeMin],
+    recipe.totalTimeMin != null && (recipe.prepTimeMin == null || recipe.cookTimeMin == null || recipe.totalTimeMin !== recipe.prepTimeMin + recipe.cookTimeMin) && ["Total", recipe.totalTimeMin],
+  ].filter(Boolean);
+  if (chips.length) header.push(h("ul", { class: "chips", "aria-label": "Temps" }, chips.map(([label, min]) => h("li", { class: "chip" }, `${label} `, h("b", {}, formatMinutes(min))))));
+  const source = safeHttpUrl(recipe.sourceUrl);
+  if (source) header.push(h("a", { class: "source", href: source, target: "_blank", rel: "noopener noreferrer" }, "Source : ", h("span", {}, recipe.siteName || hostOf(source)), " ↗"));
+  if (!saved && state.previewWarnings.length) header.push(h("div", { class: "notice warn" }, state.previewWarnings.join(" ")));
+
+  /* Portions */
+  const servingsValue = h("strong", {});
+  const servingsLabel = h("small", {});
+  const minus = h("button", { class: "stepper", "aria-label": "Moins", onclick: () => changeServings(-1) }, "−");
+  const plus = h("button", { class: "stepper", "aria-label": "Plus", onclick: () => changeServings(1) }, "+");
+  const resetBtn = h("button", { class: "servings-reset", onclick: () => { servings = base || 1; updateServings(); } });
+  const servingsBox = h("div", { class: "servings", role: "group", "aria-label": "Portions" },
+    minus, h("div", { class: "value", "aria-live": "polite" }, servingsValue, servingsLabel), plus);
+
+  function factor() { return base ? servings / base : servings; }
+  function changeServings(delta) {
+    if (base) servings = Math.min(99, Math.max(1, servings + delta));
+    else {
+      const i = Math.max(0, MULTIPLIERS.indexOf(servings));
+      servings = MULTIPLIERS[Math.min(MULTIPLIERS.length - 1, Math.max(0, i + delta))];
+    }
+    updateServings();
+  }
+
+  /* Ingrédients */
+  const ingProgress = h("span", { class: "progress" });
+  const ingItems = recipe.ingredients.map((ing, i) => {
+    const qtyEl = h("span", { class: "qty" });
+    const restEl = document.createTextNode("");
+    const box = h("input", { type: "checkbox", checked: checked.has(i) });
+    box.addEventListener("change", () => {
+      box.checked ? checked.add(i) : checked.delete(i);
+      persist();
+      updateIngProgress();
+    });
+    const li = h("li", {}, h("label", { class: "ing" }, box, h("span", { class: "box", "aria-hidden": "true" }, icon("check")), h("span", { class: "txt" }, qtyEl, restEl)));
+    li._update = (f) => {
+      if (ing.quantity == null) { qtyEl.textContent = ""; restEl.textContent = ing.raw; return; }
+      qtyEl.textContent = quantityLabel(ing, f);
+      restEl.textContent = ` ${ing.rest}`;
+    };
+    return li;
+  });
+  function updateIngProgress() {
+    ingProgress.textContent = recipe.ingredients.length ? `${checked.size} / ${recipe.ingredients.length}` : "";
+  }
+
+  function updateServings() {
+    const f = factor();
+    if (base) {
+      servingsValue.textContent = String(servings);
+      servingsLabel.textContent = servings > 1 ? "personnes" : "personne";
+    } else {
+      servingsValue.textContent = `× ${String(servings).replace(".", ",")}`;
+      servingsLabel.textContent = recipe.yieldText ? `de la recette (${recipe.yieldText})` : "quantités de la recette";
+    }
+    minus.disabled = base ? servings <= 1 : servings <= MULTIPLIERS[0];
+    plus.disabled = base ? servings >= 99 : servings >= MULTIPLIERS[MULTIPLIERS.length - 1];
+    const changed = base ? servings !== base : servings !== 1;
+    resetBtn.hidden = !changed;
+    resetBtn.textContent = base ? `Revenir à ${base} ${base > 1 ? "personnes" : "personne"}` : "Revenir aux quantités d'origine";
+    ingItems.forEach((li) => li._update(f));
+    persist();
+  }
+
+  /* Étapes */
+  const stepButtons = [];
+  const stepNodes = [];
+  let lastSection;
+  recipe.steps.forEach((step, i) => {
+    if (step.section && step.section !== lastSection) stepNodes.push(h("li", { "aria-hidden": "false" }, h("h3", { class: "sub" }, step.section)));
+    lastSection = step.section;
+    const btn = h("button", { class: "step", type: "button", onclick: () => setActive(activeStep === i ? -1 : i) },
+      h("span", { class: "n", "aria-hidden": "true" }, String(i + 1)),
+      h("span", { class: "t" }, h("span", { class: "sr-only" }, `Étape ${i + 1} : `), step.text));
+    stepButtons.push(btn);
+    stepNodes.push(h("li", {}, btn));
+  });
+  function setActive(i, scroll = true) {
+    activeStep = i;
+    stepButtons.forEach((b, j) => {
+      b.classList.toggle("active", j === i);
+      b.classList.toggle("done", i >= 0 && j < i);
+      b.setAttribute("aria-current", j === i ? "step" : "false");
+    });
+    persist();
+    if (scroll && i >= 0) stepButtons[i].scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  /* Pied */
+  const footer = h("div", { class: "r-footer" },
+    h("button", { class: "btn", onclick: () => {
+      checked.clear();
+      ingItems.forEach((li) => { li.querySelector("input").checked = false; });
+      updateIngProgress();
+      setActive(-1, false);
+      servings = base || 1;
+      updateServings();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } }, "Tout recommencer"),
+    saved && h("button", { class: "btn danger", onclick: async () => {
+      if (!confirm(`Supprimer « ${recipe.title} » du carnet ?`)) return;
+      await deleteRecipe(recipe.id);
+      toast("Recette supprimée");
+      go("#/carnet", true);
+    } }, "Supprimer"),
+  );
+
+  const content = [
+    ...header,
+    recipe.ingredients.length ? servingsBox : null,
+    recipe.ingredients.length ? resetBtn : null,
+    recipe.ingredients.length && h("div", { class: "section-title" }, h("h2", {}, "Ingrédients"), ingProgress),
+    recipe.ingredients.length && h("ul", { class: "ingredients" }, ingItems),
+    recipe.steps.length && h("div", { class: "section-title" }, h("h2", {}, "Préparation")),
+    recipe.steps.length && h("p", { class: "step-hint" }, "Touchez l'étape en cours pour la repérer."),
+    recipe.steps.length && h("ol", { class: "steps" }, stepNodes),
+    footer,
+  ].filter(Boolean);
+
+  setView(toolbar.filter(Boolean), content);
+  updateIngProgress();
+  updateServings();
+  setActive(activeStep, false);
+  refreshWakeButton();
+  document.title = `${recipe.title} · Zéro Blabla Cuisine`;
+}
+
+/* ════════════ Réglages ════════════ */
+function openSettings() {
+  let worker = "", code = "";
+  try { worker = localStorage.getItem(ZBC.WORKER_URL_KEY) || ""; code = localStorage.getItem(ZBC.ACCESS_CODE_KEY) || ""; } catch { /* */ }
+  $("#set-worker").value = worker || ZBC.getWorkerUrl();
+  $("#set-code").value = code;
+  const dlg = $("#settings");
+  if (typeof dlg.showModal === "function") dlg.showModal();
+}
+
+$("#settings").addEventListener("close", () => {
+  if ($("#settings").returnValue !== "save") return;
+  const worker = $("#set-worker").value.trim();
+  if (worker && !safeHttpUrl(worker)) { toast("Adresse du relais invalide."); return; }
+  try {
+    worker ? localStorage.setItem(ZBC.WORKER_URL_KEY, worker) : localStorage.removeItem(ZBC.WORKER_URL_KEY);
+    const code = $("#set-code").value;
+    code ? localStorage.setItem(ZBC.ACCESS_CODE_KEY, code) : localStorage.removeItem(ZBC.ACCESS_CODE_KEY);
+    toast("Réglages enregistrés");
+  } catch { toast("Réglages non enregistrés (stockage indisponible)."); }
+});
+
+$("#btn-export").addEventListener("click", () => {
+  const data = JSON.stringify({ app: "zero-blabla-cuisine", version: 1, exportedAt: new Date().toISOString(), recipes: state.recipes }, null, 2);
+  const blob = new Blob([data], { type: "application/json" });
+  const a = h("a", { href: URL.createObjectURL(blob), download: `carnet-recettes-${new Date().toISOString().slice(0, 10)}.json` });
+  document.body.append(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+});
+$("#btn-import").addEventListener("click", () => $("#import-file").click());
+$("#import-file").addEventListener("change", async (e) => {
+  const file = e.target.files?.[0];
+  e.target.value = "";
+  if (!file) return;
+  try {
+    const data = JSON.parse(await file.text());
+    const list = Array.isArray(data) ? data : data.recipes;
+    if (!Array.isArray(list)) throw new Error();
+    let added = 0;
+    for (const r of list) {
+      if (!r || typeof r.title !== "string" || !Array.isArray(r.ingredients) || !Array.isArray(r.steps)) continue;
+      if (state.recipes.some((x) => x.id === r.id || (r.sourceUrl && x.sourceUrl === r.sourceUrl))) continue;
+      const rec = { ...r, id: r.id || newId(), savedAt: r.savedAt || new Date().toISOString() };
+      await DB.put(rec);
+      state.recipes.push(rec);
+      added++;
+    }
+    state.recipes.sort((a, b) => String(b.savedAt).localeCompare(String(a.savedAt)));
+    toast(added ? `${added} recette${added > 1 ? "s" : ""} importée${added > 1 ? "s" : ""}` : "Rien de nouveau à importer");
+    route();
+  } catch { toast("Fichier non reconnu."); }
+});
+
+/* ════════════ Démarrage ════════════ */
+window.addEventListener("hashchange", route);
+window.addEventListener("scroll", () => $("#topbar").classList.toggle("scrolled", window.scrollY > 4), { passive: true });
+
+(async () => {
+  await loadRecipes();
+  route();
+})();
+
+if ("serviceWorker" in navigator && location.protocol !== "file:") {
+  navigator.serviceWorker.register("sw.js").catch((err) => console.warn("Service Worker non enregistré", err));
+}
+</script>
+</body>
+</html>

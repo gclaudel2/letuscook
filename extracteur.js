@@ -19,6 +19,17 @@
     MIN_TEXT_FOR_AI: 200,
   };
   const ACCESS_CODE_KEY = "zbc.accessCode"; // code facultatif, saisi une fois dans les réglages
+  const WORKER_URL_KEY = "zbc.workerUrl"; // adresse du relais saisie dans les réglages (prioritaire)
+
+  function readSetting(key) {
+    try { return localStorage.getItem(key) || ""; } catch { return ""; }
+  }
+
+  /** Adresse du relais : réglages de l'appli, sinon CONFIG ; "" si pas encore configurée. */
+  function getWorkerUrl() {
+    const url = (readSetting(WORKER_URL_KEY) || CONFIG.WORKER_URL).trim().replace(/\/+$/, "");
+    return /VOTRE-COMPTE/.test(url) ? "" : url;
+  }
 
   class ExtractError extends Error {
     constructor(code, message) {
@@ -395,11 +406,12 @@
 
   // ── Appels au relais ───────────────────────────────────────────
   async function callWorker(path, body) {
-    let accessCode = "";
-    try { accessCode = localStorage.getItem(ACCESS_CODE_KEY) || ""; } catch { /* stockage indisponible */ }
+    const workerUrl = getWorkerUrl();
+    if (!workerUrl) throw new ExtractError("NO_RELAY", "Indiquez d'abord l'adresse du relais dans les Réglages.");
+    const accessCode = readSetting(ACCESS_CODE_KEY);
     let res;
     try {
-      res = await fetch(CONFIG.WORKER_URL + path, {
+      res = await fetch(workerUrl + path, {
         method: "POST",
         headers: { "content-type": "application/json", ...(accessCode ? { "x-access-code": accessCode } : {}) },
         body: JSON.stringify(body),
@@ -470,7 +482,7 @@
   }
 
   window.ZBC = {
-    CONFIG, ACCESS_CODE_KEY, ExtractError,
+    CONFIG, ACCESS_CODE_KEY, WORKER_URL_KEY, getWorkerUrl, ExtractError,
     extractRecipe, extractFromHtml, parseTargetUrl,
     parseIngredient, formatIngredient, formatQuantity, parseDuration, parseServings,
   };
