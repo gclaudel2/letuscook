@@ -308,9 +308,66 @@
       totalTimeMin: totalOf(prepTimeMin, cookTimeMin, parseDuration(node.totalTime)),
       ingredients: toStringList(node.recipeIngredient ?? node.ingredients).map(cleanInline).filter(Boolean).map(parseIngredient),
       steps,
+      rating: parseRating(node.aggregateRating),
+      calories: parseCalories(node.nutrition),
+      difficulty: normalizeDifficulty(findDifficultyValue(node)),
       extractedVia: "jsonld",
       extractedAt: new Date().toISOString(),
     };
+  }
+
+
+  // ── Infos de choix : note, calories, difficulté ────────────────
+  function parseRating(r) {
+    if (!r || typeof r !== "object") return undefined;
+    if (Array.isArray(r)) return parseRating(r[0]);
+    const value = Number(String(r.ratingValue ?? "").replace(",", "."));
+    const best = Number(String(r.bestRating ?? 5).replace(",", ".")) || 5;
+    const count = parseInt(String(r.ratingCount ?? r.reviewCount ?? "0").replace(/\D/g, ""), 10) || 0;
+    if (!Number.isFinite(value) || value <= 0) return undefined;
+    return { value: Math.round((value / best) * 5 * 10) / 10, count };
+  }
+
+  function parseCalories(n) {
+    if (!n || typeof n !== "object") return undefined;
+    const m = /(\d+(?:[.,]\d+)?)/.exec(String(n.calories ?? ""));
+    const kcal = m ? Math.round(Number(m[1].replace(",", "."))) : 0;
+    return kcal > 0 && kcal < 5000 ? kcal : undefined;
+  }
+
+  /** Propriété non standard parfois présente : "difficulty", "recipeDifficulty"… */
+  function findDifficultyValue(node) {
+    for (const [k, v] of Object.entries(node || {})) {
+      if (/difficult/i.test(k) && (typeof v === "string" || typeof v === "number")) return String(v);
+    }
+    return undefined;
+  }
+
+  const DIFFICULTY_LEVELS = [
+    [/tr[eè]s\s*facile|very\s*easy|d[ée]butant/i, "Très facile"],
+    [/facile|easy|simple/i, "Facile"],
+    [/moyen|interm[ée]diaire|medium|confirm/i, "Moyenne"],
+    [/tr[eè]s\s*difficile|expert/i, "Difficile"],
+    [/difficile|hard|[ée]lev[ée]|avanc/i, "Difficile"],
+  ];
+  function normalizeDifficulty(text) {
+    if (!text) return undefined;
+    const t = String(text).trim();
+    if (/^[1-5]$/.test(t)) return ["Très facile", "Facile", "Moyenne", "Difficile", "Difficile"][Number(t) - 1];
+    for (const [re, label] of DIFFICULTY_LEVELS) if (re.test(t)) return label;
+    return undefined;
+  }
+
+  /** Difficulté affichée sur la page (pas dans schema.org) : éléments "difficulty", ou "Difficulté : facile". */
+  function findDifficultyInPage(doc) {
+    for (const el of doc.querySelectorAll('[class*="difficult" i], [id*="difficult" i], [data-difficulty]')) {
+      const own = el.getAttribute("data-difficulty") || normSpace(el.textContent);
+      const txt = own && own.length <= 40 ? own : el.parentElement && normSpace(el.parentElement.textContent).length <= 60 ? normSpace(el.parentElement.textContent) : "";
+      const d = normalizeDifficulty(txt.replace(/difficult[ée]\s*:?/i, ""));
+      if (d) return d;
+    }
+    const m = /(?:difficult[ée]|niveau)\s*:?\s*(tr[eè]s facile|facile|moyenne?|interm[ée]diaire|difficile|[ée]lev[ée]e?)/i.exec(normSpace(doc.body ? doc.body.textContent : ""));
+    return m ? normalizeDifficulty(m[1]) : undefined;
   }
 
   // ── Métadonnées et texte principal (pour l'IA) ─────────────────
@@ -695,6 +752,9 @@
         log("Recette non reconnue dans le texte", "info");
       }
     }
+    if (recipe && !recipe.difficulty) {
+      try { recipe.difficulty = findDifficultyInPage(doc); } catch { /* facultatif */ }
+    }
     return { recipe, complete: isComplete(recipe), meta, getText: () => extractMainText(doc) };
   }
 
@@ -761,9 +821,23 @@
     throw new ExtractError("NO_RECIPE", "Aucune recette trouvée sur cette page.");
   }
 
+  /** Recherche de recettes (relais → Tavily) : [{ url, title, snippet }] */
+  async function searchRecipes(q) {
+    const res = await callWorker("/recherche", { q });
+    return res.results || [];
+  }
+
+  /** Récupère et analyse une page SANS IA (pour les fiches de résultats). */
+  async function analyzeUrl(url) {
+    const page = await callWorker("/page", { url });
+    const finalUrl = page.finalUrl || url;
+    const { recipe, complete } = extractFromHtml(page.html, finalUrl);
+    return { recipe, complete, finalUrl };
+  }
+
   window.ZBC = {
     CONFIG, ACCESS_CODE_KEY, WORKER_URL_KEY, getWorkerUrl, ExtractError,
-    extractRecipe, extractFromHtml, parseTargetUrl,
+    extractRecipe, extractFromHtml, parseTargetUrl, searchRecipes, analyzeUrl,
     parseIngredient, formatIngredient, formatQuantity, parseDuration, parseServings,
   };
 })();
