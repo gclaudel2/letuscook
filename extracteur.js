@@ -799,6 +799,55 @@
     return { text, lines };
   }
 
+  /** Photo → JPEG ~1600 px en base64 (sans le préfixe data:), assez net pour l'IA et léger à envoyer. */
+  function photoToBase64(file, maxSide = 1600) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+        const c = document.createElement("canvas");
+        c.width = Math.round(img.naturalWidth * scale); c.height = Math.round(img.naturalHeight * scale);
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        resolve(c.toDataURL("image/jpeg", 0.82).split(",")[1]);
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new ExtractError("BAD_IMAGE", "Cette image n'a pas pu être ouverte.")); };
+      img.src = url;
+    });
+  }
+
+  /** Photo(s) → recette, lue par l'IA via le relais (Gemini). Meilleur résultat, y compris l'écriture manuscrite. */
+  async function photosToRecipeAI(files, onProgress = () => {}) {
+    const t0 = performance.now();
+    const log = (message, status = "info") => { try { onProgress(message, status, Math.round(performance.now() - t0)); } catch { /* */ } };
+    const list = [...files].filter(Boolean).slice(0, 4);
+    if (!list.length) throw new ExtractError("BAD_IMAGE", "Choisissez une photo.");
+    log("Préparation de la photo…", "run");
+    const images = [];
+    for (const f of list) images.push(await photoToBase64(f));
+    const kb = Math.round(images.reduce((n, b) => n + b.length * 0.75, 0) / 1024);
+    log(`Lecture par l'IA (${list.length > 1 ? `${list.length} photos, ` : ""}${kb} Ko envoyés, 5 à 30 s)…`, "run");
+    let res;
+    try {
+      res = await callWorker("/photo", { images });
+    } catch (err) {
+      if (err.code === "NOT_FOUND") err.message = "Le relais n'est pas à jour : recollez le fichier relais.js dans Cloudflare pour activer la lecture des photos par l'IA.";
+      log(err.message, "error");
+      throw err;
+    }
+    const who = PROVIDER_NAMES[res.provider] || "l'IA";
+    if (!res.recipe || res.recipe.found === false) {
+      log(`${who} ne voit pas de recette sur la photo`, "error");
+      throw new ExtractError("NO_RECIPE", "L'IA ne voit pas de recette sur cette photo. Cadrez la page entière, bien nette.");
+    }
+    const recipe = aiToRecipe(res.recipe, undefined, { siteName: "Photo" });
+    recipe.extractedVia = "photo-llm";
+    recipe.aiProvider = res.provider;
+    log(`Recette lue par ${who} : ${recipe.ingredients.length} ingrédients, ${recipe.steps.length} étapes`, recipe.ingredients.length && recipe.steps.length ? "ok" : "warn");
+    return recipe;
+  }
+
   /*
    * Texte lu sur une photo → recette. L'OCR coupe les phrases en fin de ligne visuelle : on recolle les lignes,
    * on repère les rubriques (« Ingrédients », « Préparation », « Pour la pâte : »), puis les ingrédients
@@ -970,7 +1019,10 @@
       yieldText: asStr(ai.yieldText),
       prepTimeMin, cookTimeMin,
       totalTimeMin: totalOf(prepTimeMin, cookTimeMin, parseDuration(asNum(ai.totalTimeMinutes))),
-      ingredients: ingredients.map((s) => s.trim()).filter(Boolean).map(parseIngredient),
+      ingredients: ingredients.map((s) => s.trim()).filter(Boolean).map((s) => {
+        const m = /^\[([^\]]{1,60})\]\s*(.+)$/.exec(s); // "[Pour la pâte] 250 g de farine"
+        return m ? { ...parseIngredient(m[2]), section: m[1].trim() } : parseIngredient(s);
+      }),
       steps: steps
         .map((s) => (typeof s === "string" ? { text: s } : s || {}))
         .map((s) => ({ text: asStr(s.text) || "", section: asStr(s.section) }))
@@ -1628,7 +1680,7 @@
 
   window.ZBC = {
     CONFIG, ACCESS_CODE_KEY, WORKER_URL_KEY, getWorkerUrl, ExtractError,
-    extractRecipe, extractFromHtml, parseTargetUrl, searchRecipes, readPhotos, recipeFromText, analyzeUrl, previewImages, rememberImage, cachedImage, synthesize, refreshChefIndex, chefIndexStatus, chefIndexStale, setChefSourceEnabled, CHEF_CATALOGS, getSearchSites, saveSearchSites, resetSearchSites, rememberRemovedSite, normalizeHost, testSearchSite, DEFAULT_SEARCH_SITES,
+    extractRecipe, extractFromHtml, parseTargetUrl, searchRecipes, readPhotos, recipeFromText, photosToRecipeAI, analyzeUrl, previewImages, rememberImage, cachedImage, synthesize, refreshChefIndex, chefIndexStatus, chefIndexStale, setChefSourceEnabled, CHEF_CATALOGS, getSearchSites, saveSearchSites, resetSearchSites, rememberRemovedSite, normalizeHost, testSearchSite, DEFAULT_SEARCH_SITES,
     parseIngredient, formatIngredient, formatQuantity, parseDuration, parseServings,
   };
 })();

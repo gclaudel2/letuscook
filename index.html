@@ -272,6 +272,8 @@
   .photo-block .or { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; color: var(--muted); font-size: 14px; }
   .photo-block .or::before, .photo-block .or::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
   .photo-btn { width: 100%; }
+  .photo-mode { margin-bottom: 10px; }
+  .retry-photo { width: 100%; margin-top: 10px; }
   .ocr-text { margin-top: 10px; font-size: 14px; }
   .ocr-text summary { color: var(--accent); cursor: pointer; padding: 6px 0; }
   .ocr-text pre { white-space: pre-wrap; max-height: 240px; overflow: auto; padding: 10px; border-radius: var(--r-sm); background: var(--surface); border: 1px solid var(--line); font: 13px/1.45 ui-monospace, Menlo, monospace; }
@@ -599,14 +601,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.8.1"></script>
-<script src="extracteur.js?v=2.8.1"></script>
+<script src="config.js?v=2.9.0"></script>
+<script src="extracteur.js?v=2.9.0"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.8.1";
+const APP_VERSION = "2.9.0";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1384,17 +1386,31 @@ function renderExtractPanel() {
     type: "file", accept: "image/*", multiple: true, hidden: true,
     onchange: (e) => { const files = [...e.target.files]; e.target.value = ""; if (files.length) runPhotoExtraction(files); },
   });
+  const mode = photoMode();
+  const modeBtn = (value, label) => h("button", {
+    type: "button", class: "seg", "aria-pressed": String(mode === value), disabled: state.loading,
+    onclick: () => { store.set("zbc.photoMode", value); renderHome(); },
+  }, label);
   const photo = h("div", { class: "photo-block" },
     h("div", { class: "or" }, h("span", {}, "ou")),
+    h("div", { class: "segs photo-mode", role: "group", "aria-label": "Lecture de la photo" },
+      modeBtn("iphone", "Sur l'iPhone"), modeBtn("ia", "Par l'IA")),
     h("button", { class: "btn photo-btn", type: "button", disabled: state.loading, onclick: () => photoInput.click() },
       icon("camera"), state.loadingPhoto ? "Lecture de la photo…" : "Photo d'une recette"),
     photoInput,
-    h("p", { class: "hint" }, "Livre, magazine, fiche ou cahier : page bien à plat, photo de face et bien éclairée. Plusieurs photos si la recette tient sur 2 pages. Tout est lu sur l'iPhone, sans IA et sans rien envoyer."));
+    h("p", { class: "hint" }, mode === "ia"
+      ? "Lue par l'IA (Gemini) : le meilleur résultat, même pour un cahier écrit à la main. La photo est envoyée à Google via votre relais ; Internet nécessaire."
+      : "Lue sur l'iPhone, sans IA et sans rien envoyer : bien pour un texte imprimé, page à plat, photo de face et bien éclairée."),
+    h("p", { class: "hint" }, "Livre, magazine, fiche ou cahier. Plusieurs photos si la recette tient sur 2 pages."));
 
   return h("section", { "aria-label": "Extraire une recette" },
     form,
     photo,
     state.lastError && h("div", { class: "notice error", role: "alert" }, state.lastError),
+    state.lastError && state.lastPhotos && h("button", {
+      class: "btn retry-photo", type: "button",
+      onclick: () => runPhotoExtraction(state.lastPhotos, state.lastPhotoMode === "ia" ? "iphone" : "ia"),
+    }, icon("camera"), state.lastPhotoMode === "ia" ? "Réessayer en lisant sur l'iPhone" : "Réessayer avec l'IA"),
     state.lastError && state.ocrText && h("details", { class: "ocr-text" }, h("summary", {}, "Voir le texte lu sur la photo"), h("pre", {}, state.ocrText.trim())),
     renderLog(),
     h("p", { class: "hint" }, "Pour un lien, dans Safari : Partager › Copier, puis revenez ici et touchez le bouton Coller."),
@@ -1488,14 +1504,34 @@ function photoThumb(file) {
 }
 
 /** Photo(s) d'une recette → lecture du texte sur l'iPhone → recette pas à pas (aperçu, puis carnet). */
-async function runPhotoExtraction(files) {
+const photoMode = () => (store.get("zbc.photoMode", "iphone") === "ia" ? "ia" : "iphone");
+
+async function runPhotoExtraction(files, forceMode) {
   if (state.loading) return;
-  if (typeof ZBC.readPhotos !== "function") { // ancien moteur encore en cache
+  if (typeof ZBC.readPhotos !== "function" || typeof ZBC.photosToRecipeAI !== "function") { // ancien moteur encore en cache
     state.lastError = "L'appli n'a pas fini de se mettre à jour : fermez-la complètement (balayez-la vers le haut) puis rouvrez-la.";
     return renderHome();
   }
-  Object.assign(state, { loading: true, loadingPhoto: true, log: [], lastError: "", ocrText: "" });
+  const mode = forceMode || photoMode();
+  Object.assign(state, { loading: true, loadingPhoto: true, log: [], lastError: "", ocrText: "", lastPhotos: files, lastPhotoMode: mode });
   renderHome();
+  if (mode === "ia") {
+    try {
+      const recipe = await ZBC.photosToRecipeAI(files, pushLog);
+      recipe.image = await photoThumb(files[0]);
+      const warnings = ["Lue par l'IA sur la photo : vérifiez les quantités avant de cuisiner."];
+      if (!recipe.ingredients.length) warnings.unshift("Aucun ingrédient reconnu.");
+      if (!recipe.steps.length) warnings.unshift("Aucune étape reconnue.");
+      Object.assign(state, { preview: recipe, previewWarnings: warnings, loading: false, loadingPhoto: false, lastPhotos: null });
+      store.del("zbc.progress.apercu");
+      go("#/apercu");
+    } catch (err) {
+      Object.assign(state, { loading: false, loadingPhoto: false, lastError: err.message || "La lecture de la photo par l'IA a échoué." });
+      renderHome();
+      if (err.code === "NO_RELAY") openSettings();
+    }
+    return;
+  }
   try {
     const { text, lines } = await ZBC.readPhotos(files, pushLog);
     state.ocrText = text;
@@ -1511,7 +1547,7 @@ async function runPhotoExtraction(files) {
     const warnings = ["Lue automatiquement sur la photo : vérifiez les quantités avant de cuisiner."];
     if (!recipe.ingredients.length) warnings.unshift("Aucun ingrédient reconnu.");
     if (!recipe.steps.length) warnings.unshift("Aucune étape reconnue.");
-    Object.assign(state, { preview: recipe, previewWarnings: warnings, loading: false, loadingPhoto: false });
+    Object.assign(state, { preview: recipe, previewWarnings: warnings, loading: false, loadingPhoto: false, lastPhotos: null });
     store.del("zbc.progress.apercu");
     go("#/apercu");
   } catch (err) {
@@ -1893,6 +1929,7 @@ function renderRecipe(recipe, { saved }) {
     jsonld: "données structurées du site (sans IA)",
     html: "lecture du texte de la page (sans IA)",
     photo: "lecture de la photo sur l'iPhone (sans IA)",
+    "photo-llm": `lecture de la photo par l'IA${recipe.aiProvider ? ` (${{ gemini: "Gemini", anthropic: "Claude", openai: "ChatGPT" }[recipe.aiProvider] || recipe.aiProvider})` : ""}`,
     llm: `analyse IA${recipe.aiProvider ? ` (${{ gemini: "Gemini", mistral: "Mistral", anthropic: "Claude", openai: "ChatGPT" }[recipe.aiProvider] || recipe.aiProvider})` : ""}`,
   };
   if (VIA[recipe.extractedVia]) header.push(h("p", { class: "via" }, `Extraite par ${VIA[recipe.extractedVia]}`));
