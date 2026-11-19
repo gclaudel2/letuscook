@@ -916,13 +916,13 @@
     { id: "ietflp", name: "Il était une fois la pâtisserie", host: "www.iletaitunefoislapatisserie.com", urls: ["https://www.iletaitunefoislapatisserie.com/?s={q}"] },
     { id: "ptitchef", name: "Ptitchef", host: "www.ptitchef.com", urls: ["https://www.ptitchef.com/recettes/recherche?q={q}", "https://www.ptitchef.com/recherche?q={q}"] },
     // Recettes de chefs (étoilés et grands noms)
-    { id: "madamefigaro", name: "Madame Figaro", host: "madame.lefigaro.fr", chef: true, urls: ["https://madame.lefigaro.fr/recherche?q={q}", "https://madame.lefigaro.fr/recherche/{q}"] },
-    { id: "cvf", name: "Cuisine et Vins de France", host: "www.cuisineetvinsdefrance.com", chef: true, urls: ["https://www.cuisineetvinsdefrance.com/recherche?q={q}", "https://www.cuisineetvinsdefrance.com/?s={q}"] },
     { id: "atelierdeschefs", name: "L'Atelier des Chefs", host: "www.atelierdeschefs.fr", chef: true, urls: ["https://www.atelierdeschefs.fr/fr/recherche?q={q}", "https://www.atelierdeschefs.fr/recherche?q={q}"] },
   ];
   // Les sites ajoutés dans une nouvelle version rejoignent aussi les listes déjà personnalisées
-  const SITES_VERSION = 3;
-  const RETIRED_SITES = ["michelin"]; // remplacé par l'index des recettes de chefs
+  const SITES_VERSION = 4;
+  // Retirés : Michelin (remplacé par l'index), Madame Figaro (bloque les lectures automatiques),
+  // Cuisine et Vins de France (erreur 526 : refuse les connexions du relais)
+  const RETIRED_SITES = ["michelin", "madamefigaro", "cvf"];
   const SITES_VERSION_KEY = "zbc.sites.version";
   const SITES_REMOVED_KEY = "zbc.sites.removed";
   const SITES_KEY = "zbc.sites";

@@ -160,6 +160,7 @@ async function handlePage(body) {
 
   if (!res.ok) {
     const msg = res.status === 403 || res.status === 429 ? "Ce site bloque la lecture automatique de ses pages."
+      : res.status >= 520 && res.status <= 530 ? `Ce site refuse la connexion du relais (erreur ${res.status}).`
       : res.status === 404 ? "Page introuvable (404)."
       : `Le site a répondu avec une erreur (${res.status}).`;
     throw new RelayError("FETCH_FAILED", msg, 502);
