@@ -699,6 +699,260 @@
     };
   }
 
+
+  // ── Photo d'une recette : lecture du texte SUR L'IPHONE (Tesseract.js), puis découpage sans IA ──
+  /*
+   * Le module de lecture (OCR) est chargé seulement au premier usage, depuis jsDelivr.
+   * Les données de langue (français) sont gardées par Tesseract dans le navigateur : ensuite ça marche hors ligne.
+   * Aucune photo n'est envoyée nulle part.
+   */
+  const TESSERACT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
+  let tesseractLoading = null;
+  function loadTesseract() {
+    if (window.Tesseract) return Promise.resolve(window.Tesseract);
+    if (!tesseractLoading) {
+      tesseractLoading = new Promise((resolve, reject) => {
+        const s = document.createElement("script");
+        s.src = TESSERACT_URL; s.async = true; s.crossOrigin = "anonymous";
+        s.onload = () => (window.Tesseract ? resolve(window.Tesseract) : reject(new Error("module absent")));
+        s.onerror = () => reject(new Error("chargement impossible"));
+        document.head.append(s);
+      }).catch((err) => {
+        tesseractLoading = null;
+        throw new ExtractError("OCR_UNAVAILABLE", navigator.onLine === false
+          ? "La lecture des photos a besoin d'Internet la toute première fois (téléchargement du module). Réessayez une fois connecté."
+          : `Impossible de charger le module de lecture des photos (${err.message}).`);
+      });
+    }
+    return tesseractLoading;
+  }
+
+  /** Photo → image redressée, en niveaux de gris, contrastée, ~2000 px : ce que l'OCR lit le mieux. */
+  function prepareImage(file) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        const w0 = img.naturalWidth, h0 = img.naturalHeight;
+        const scale = Math.min(2, 2000 / Math.max(w0, h0));
+        const w = Math.round(w0 * scale), h = Math.round(h0 * scale);
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        ctx.drawImage(img, 0, 0, w, h);
+        try {
+          const data = ctx.getImageData(0, 0, w, h);
+          const px = data.data, n = w * h, hist = new Uint32Array(256), gray = new Uint8Array(n);
+          for (let i = 0; i < n; i++) {
+            const g = (px[i * 4] * 299 + px[i * 4 + 1] * 587 + px[i * 4 + 2] * 114) / 1000 | 0;
+            gray[i] = g; hist[g]++;
+          }
+          let lo = 0, hi = 255, acc = 0;
+          for (; lo < 255 && (acc += hist[lo]) < n * 0.02; lo++);
+          acc = 0;
+          for (; hi > 0 && (acc += hist[hi]) < n * 0.02; hi--);
+          const span = Math.max(1, hi - lo);
+          for (let i = 0; i < n; i++) {
+            const v = Math.max(0, Math.min(255, ((gray[i] - lo) * 255) / span));
+            px[i * 4] = px[i * 4 + 1] = px[i * 4 + 2] = v;
+          }
+          ctx.putImageData(data, 0, 0);
+        } catch { /* image protégée : on garde la couleur */ }
+        resolve(canvas);
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new ExtractError("BAD_IMAGE", "Cette image n'a pas pu être ouverte.")); };
+      img.src = url;
+    });
+  }
+
+  /** Lit le texte d'une ou plusieurs photos (dans l'ordre). → { text, lines: [{ text, h, photo }] } */
+  async function readPhotos(files, onProgress = () => {}) {
+    const t0 = performance.now();
+    const log = (message, status = "info") => { try { onProgress(message, status, Math.round(performance.now() - t0)); } catch { /* */ } };
+    const list = [...files].filter((f) => f && /^image\//.test(f.type || "image/"));
+    if (!list.length) throw new ExtractError("BAD_IMAGE", "Choisissez une photo.");
+    log(window.Tesseract ? "Module de lecture prêt" : "Chargement du module de lecture (la 1re fois : ~15 Mo, ensuite instantané)…", "run");
+    const T = await loadTesseract();
+    log("Préparation de la lecture en français…", "run");
+    let worker;
+    try {
+      worker = await T.createWorker("fra", 1);
+    } catch (err) {
+      log("Module de lecture indisponible", "error");
+      throw new ExtractError("OCR_UNAVAILABLE", "Le module de lecture n'a pas pu démarrer (connexion nécessaire la toute première fois).");
+    }
+    const texts = [], lines = [];
+    try {
+      for (let i = 0; i < list.length; i++) {
+        log(list.length > 1 ? `Lecture de la photo ${i + 1}/${list.length} (10 à 20 s)…` : "Lecture de la photo (10 à 20 s)…", "run");
+        const canvas = await prepareImage(list[i]);
+        const { data } = await worker.recognize(canvas);
+        texts.push(data.text || "");
+        (data.lines || []).forEach((l) => lines.push({ text: l.text || "", h: l.bbox ? l.bbox.y1 - l.bbox.y0 : 0, photo: i }));
+      }
+    } finally {
+      try { await worker.terminate(); } catch { /* */ }
+    }
+    const text = texts.join("\n\n");
+    log(`Texte lu : ${normSpace(text).length.toLocaleString("fr-FR")} caractères`, "ok");
+    return { text, lines };
+  }
+
+  /*
+   * Texte lu sur une photo → recette. L'OCR coupe les phrases en fin de ligne visuelle : on recolle les lignes,
+   * on repère les rubriques (« Ingrédients », « Préparation », « Pour la pâte : »), puis les ingrédients
+   * (lignes avec quantité) et les étapes (numérotées, ou paragraphes / phrases).
+   */
+  const OCR_BULLET = /^[\s•●▪■◦·*»>~=_|©®¢°o◆◇►▶✓✔-]{1,3}\s+(?=\S)/;
+  const OCR_ING_HEAD = /^(?:les?\s+)?ingr[ée]dients?\b[^.]{0,40}$/i;
+  const OCR_STEP_HEAD = /^(?:la\s+)?(?:pr[ée]paration|[ée]tapes?|instructions|r[ée]alisation|d[ée]roul[ée]|m[ée]thode|recette|progression)\s*:?\s*$/i;
+  const OCR_STOP = /^(?:astuces?|conseils?|le conseil|bon [àa] savoir|variantes?|notes?|le petit plus|accord mets|vin conseill)/i;
+  const OCR_STEP_START = /^(?:[ée]tape\s*)?\d{1,2}\s*[.)/:–-]\s*(?=\S)/i;
+  const OCR_SECTION = /^(?:(?:pour|la|le|les|l['’])\s.{2,45}|[^\d,]{2,40}):\s*$/i;
+
+  function recipeFromText(raw, opts = {}) {
+    // 1. Lignes nettoyées (lignes vides = fin de paragraphe), mots coupés recollés
+    const src = String(raw || "").replace(/\r/g, "").replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/ﬁ/g, "fi").replace(/ﬂ/g, "fl").split("\n");
+    const L = [];
+    for (let i = 0; i < src.length; i++) {
+      let line = src[i].replace(/\s+/g, " ").trim();
+      if (!line) { L.push({ blank: true }); continue; }
+      const bullet = OCR_BULLET.test(line);
+      line = line.replace(OCR_BULLET, "").trim();
+      if (!/[a-zà-ÿ0-9½¼¾]/i.test(line)) continue; // bruit (traits, points…)
+      const prev = L[L.length - 1];
+      if (prev && !prev.blank && /[a-zà-ÿ]-$/i.test(prev.text) && /^[a-zà-ÿ]/.test(line)) { prev.text = prev.text.slice(0, -1) + line; continue; }
+      L.push({ text: line, bullet });
+    }
+    const lines = L.filter((l) => !l.blank);
+    if (!lines.length) return null;
+    const fullText = normSpace(lines.map((l) => l.text).join(" "));
+
+    const isIngLine = (t) => hasQty(t) && t.length <= 90 && !(/[.!?]\s+[A-ZÀ-Ý]/.test(t)) && !IMPERATIVE.test(t.replace(/^\S+\s+\S+/, ""));
+    const isTimeLine = (t) => /^(?:temps\s+de\s+)?(?:pr[ée]paration|cuisson|repos|total)\s*:?\s*\d/i.test(t) || /^pour\s+\d+\s*(?:personnes?|pers|parts?|portions?)/i.test(t);
+    const isSection = (t) => OCR_SECTION.test(t) && !hasQty(t) && !OCR_STEP_HEAD.test(t) && !OCR_ING_HEAD.test(t.replace(/:$/, ""));
+
+    // 2. Repères : rubrique ingrédients, rubrique étapes
+    const idx = (re, from = 0) => L.findIndex((l, i) => i >= from && !l.blank && re.test(l.text.replace(/\s*:\s*$/, "")) && !/\d/.test(l.text.replace(/pour\s+\d+.*$/i, "")));
+    const iIngHead = L.findIndex((l) => !l.blank && OCR_ING_HEAD.test(l.text));
+    let iIng = iIngHead; // les ingrédients commencent juste après
+    const iStep = idx(OCR_STEP_HEAD, iIng >= 0 ? iIng + 1 : 0);
+    if (iIng < 0) {
+      // pas de titre « Ingrédients » : premier groupe d'au moins 2 lignes avec quantité
+      for (let i = 0; i < L.length - 1; i++) {
+        if (L[i].blank || !isIngLine(L[i].text)) continue;
+        const next = L.slice(i + 1).find((l) => !l.blank);
+        if (next && isIngLine(next.text)) { iIng = i - 1; break; }
+      }
+    }
+    const looksLikeStep = (t) => !hasQty(t) && (t.length > 45 || /[.!?]\s+\S/.test(t) || (/[.!]$/.test(t) && t.length > 25));
+
+    // 3. Ingrédients
+    const ingredients = [];
+    let section;
+    let endIng = iStep >= 0 ? iStep : L.length;
+    if (iIng >= -1 && (iIng >= 0 || L.some((l) => !l.blank && isIngLine(l.text)))) {
+      let last = null;
+      for (let i = iIng + 1; i < endIng; i++) {
+        const l = L[i];
+        if (l.blank) { last = null; continue; }
+        const t = l.text;
+        if (OCR_STOP.test(t)) { endIng = i; break; }
+        if (isTimeLine(t)) continue;
+        if (isSection(t)) { section = t.replace(/\s*:\s*$/, ""); last = null; continue; }
+        if (iStep < 0 && (looksLikeStep(t) || OCR_STEP_START.test(t) && !hasQty(t.replace(OCR_STEP_START, "")) && t.length > 30)) { endIng = i; break; }
+        if (last && !l.bullet && !hasQty(t) && /^[a-zà-ÿ(]/.test(t) && last.raw.length + t.length < 120) {
+          last.raw += " " + t; Object.assign(last.ing, parseIngredient(last.raw)); continue; // suite de la ligne précédente
+        }
+        const items = !hasQty(t) && t.includes(",") && t.length <= 70 ? splitItems(t) : [t];
+        for (const it of items) {
+          const ing = { ...parseIngredient(it), section: section || undefined };
+          ingredients.push(ing);
+          last = { raw: it, ing };
+        }
+      }
+    }
+
+    // 4. Étapes
+    let stepFrom = iStep >= 0 ? iStep + 1 : endIng;
+    const steps = [];
+    let cur = null, stepSection, markedSteps = 0;
+    const flush = () => { if (cur && normSpace(cur.text).length >= 8) steps.push({ text: normSpace(cur.text), section: cur.section }); cur = null; };
+    let newPara = true;
+    for (let i = stepFrom; i < L.length; i++) {
+      const l = L[i];
+      if (l.blank) { newPara = true; continue; }
+      const t = l.text;
+      if (OCR_STOP.test(t)) break;
+      if (isTimeLine(t) || OCR_STEP_HEAD.test(t.replace(/\s*:\s*$/, ""))) continue;
+      if (isSection(t) && t.length <= 45) { flush(); stepSection = t.replace(/\s*:\s*$/, ""); newPara = true; continue; }
+      const numbered = OCR_STEP_START.test(t) && !isIngLine(t.replace(OCR_STEP_START, ""));
+      const prevEnded = cur && /[.!]$/.test(cur.text);
+      if (numbered || l.bullet) markedSteps++;
+      if (!cur || numbered || l.bullet || (newPara && prevEnded) || (prevEnded && /^[A-ZÀ-Ý]/.test(t) && cur.text.length > 160)) {
+        flush();
+        cur = { text: t.replace(OCR_STEP_START, ""), section: stepSection || undefined };
+      } else {
+        cur.text += " " + t;
+      }
+      newPara = false;
+    }
+    flush();
+    // Texte en bloc (cahier manuscrit, pas de numéros) : une étape par phrase, les phrases très courtes restent avec la suivante
+    if (markedSteps < 2 && steps.some((st) => st.text.length > 150)) {
+      const out = [];
+      for (const st of steps) {
+        const sentences = st.text.split(/(?<=[.!])\s+(?=[A-ZÀ-Ý])/);
+        let acc = "";
+        for (const s0 of sentences) {
+          acc = acc ? acc + " " + s0 : s0;
+          if (acc.length >= 45) { out.push({ text: acc, section: st.section }); acc = ""; }
+        }
+        if (acc) {
+          const prev = out[out.length - 1];
+          if (prev && prev.section === st.section && acc.length < 30) prev.text += " " + acc;
+          else out.push({ text: acc, section: st.section });
+        }
+      }
+      steps.splice(0, steps.length, ...out);
+    }
+
+    if (!ingredients.length && !steps.length) return null;
+
+    // 5. Titre : la ligne écrite le plus gros en haut de la 1re photo, sinon la 1re ligne de texte
+    const firstMark = [iIngHead >= 0 ? iIngHead : iIng + 1, iStep].filter((i) => i >= 0);
+    const headLimit = firstMark.length ? Math.min(...firstMark) : Math.min(L.length, 6);
+    const headTexts = L.slice(0, Math.max(0, headLimit)).filter((l) => !l.blank).map((l) => l.text)
+      .filter((t) => /[a-zà-ÿ]{3}/i.test(t) && t.length <= 90 && !isTimeLine(t) && !hasQty(t));
+    let title = headTexts[0];
+    const big = (opts.lines || []).filter((x) => x.photo === 0 && x.h > 0).slice(0, 12)
+      .map((x) => ({ t: normSpace(x.text).replace(OCR_BULLET, ""), h: x.h }))
+      .filter((x) => headTexts.includes(x.t));
+    if (big.length) title = big.reduce((a, b) => (b.h > a.h * 1.15 ? b : a)).t;
+
+    // 6. Portions et temps
+    const serv = /pour\s+(\d{1,2})(?:\s*(?:à|-|–)\s*\d{1,2})?\s*(?:personnes?|pers\b|parts?|portions?|gourmands?|convives?)/i.exec(fullText);
+    const timeAfter = (word) => {
+      const m = new RegExp(`${word}\\s*:?\\s*((?:\\d+\\s*(?:h|heures?|min(?:utes?)?|mn)\\s*\\d*\\s*)+)`, "i").exec(fullText);
+      return m ? parseDuration(m[1]) : null;
+    };
+    const prepTimeMin = timeAfter("pr[ée]paration");
+    const cookTimeMin = timeAfter("cuisson");
+    return {
+      title: title ? (title === title.toUpperCase() && /[A-ZÀ-Ý]{3}/.test(title) ? title.charAt(0) + title.slice(1).toLowerCase() : title).replace(/[.:]+$/, "") : "Recette en photo",
+      siteName: "Photo",
+      servings: serv ? Number(serv[1]) : null,
+      yieldText: serv ? normSpace(serv[0]) : undefined,
+      prepTimeMin, cookTimeMin,
+      totalTimeMin: totalOf(prepTimeMin, cookTimeMin, null),
+      ingredients,
+      steps,
+      extractedVia: "photo",
+      extractedAt: new Date().toISOString(),
+    };
+  }
+
   // ── Réponse IA → recette (validation défensive) ────────────────
   const asNum = (v) => (v == null || v === "" ? null : Number.isFinite(Number(v)) ? Number(v) : parseDuration(v));
   const asStr = (v) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
@@ -1374,7 +1628,7 @@
 
   window.ZBC = {
     CONFIG, ACCESS_CODE_KEY, WORKER_URL_KEY, getWorkerUrl, ExtractError,
-    extractRecipe, extractFromHtml, parseTargetUrl, searchRecipes, analyzeUrl, previewImages, rememberImage, cachedImage, synthesize, refreshChefIndex, chefIndexStatus, chefIndexStale, setChefSourceEnabled, CHEF_CATALOGS, getSearchSites, saveSearchSites, resetSearchSites, rememberRemovedSite, normalizeHost, testSearchSite, DEFAULT_SEARCH_SITES,
+    extractRecipe, extractFromHtml, parseTargetUrl, searchRecipes, readPhotos, recipeFromText, analyzeUrl, previewImages, rememberImage, cachedImage, synthesize, refreshChefIndex, chefIndexStatus, chefIndexStale, setChefSourceEnabled, CHEF_CATALOGS, getSearchSites, saveSearchSites, resetSearchSites, rememberRemovedSite, normalizeHost, testSearchSite, DEFAULT_SEARCH_SITES,
     parseIngredient, formatIngredient, formatQuantity, parseDuration, parseServings,
   };
 })();

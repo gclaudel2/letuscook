@@ -5,9 +5,9 @@
  * - Les recettes elles-mêmes sont dans IndexedDB (pas ici)
  * Changer VERSION à chaque mise en ligne d'une nouvelle version force le renouvellement du cache.
  */
-const VERSION = "zbc-2.7.0"; // = APP_VERSION dans index.html
+const VERSION = "zbc-2.8.0"; // = APP_VERSION dans index.html
 const IMAGE_CACHE = "zbc-images";
-const FONT_CACHE = "zbc-fonts"; // polices des thèmes (Google Fonts), gardées pour le hors ligne
+const FONT_CACHE = "zbc-fonts"; // polices des thèmes (Google Fonts) et module de lecture des photos, gardés pour le hors ligne
 const MAX_IMAGES = 200;
 const NETWORK_TIMEOUT_MS = 3500;
 
@@ -97,7 +97,7 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(networkFirst(request, request.mode === "navigate"));
     return;
   }
-  if (url.hostname === "fonts.googleapis.com" || url.hostname === "fonts.gstatic.com") {
+  if (url.hostname === "fonts.googleapis.com" || url.hostname === "fonts.gstatic.com" || url.hostname === "cdn.jsdelivr.net") {
     event.respondWith(cacheFirstFont(request));
     return;
   }

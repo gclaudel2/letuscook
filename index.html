@@ -268,6 +268,13 @@
   .btn.ghost { border-color: transparent; background: transparent; color: var(--muted); }
   .btn.danger { color: var(--danger); }
   .hint { color: var(--muted); font-size: 15px; margin: 14px 2px 0; }
+  .photo-block { margin-top: 22px; }
+  .photo-block .or { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; color: var(--muted); font-size: 14px; }
+  .photo-block .or::before, .photo-block .or::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
+  .photo-btn { width: 100%; }
+  .ocr-text { margin-top: 10px; font-size: 14px; }
+  .ocr-text summary { color: var(--accent); cursor: pointer; padding: 6px 0; }
+  .ocr-text pre { white-space: pre-wrap; max-height: 240px; overflow: auto; padding: 10px; border-radius: var(--r-sm); background: var(--surface); border: 1px solid var(--line); font: 13px/1.45 ui-monospace, Menlo, monospace; }
 
   .log { margin-top: 16px; padding: 12px 14px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); }
   .log-title { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 6px; }
@@ -599,7 +606,7 @@ window.applyTheme = function (name) {
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.7.0";
+const APP_VERSION = "2.8.0";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -628,6 +635,7 @@ const ICONS = {
   sun: "M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10zM12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4",
   bookmark: "M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z",
   check: "M20 6L9 17l-5-5",
+  camera: "M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2zM12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z",
   paste: "M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2M9 2h6v4H9z",
   clock: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 6v6l4 2",
   users: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75",
@@ -674,6 +682,8 @@ function formatMinutes(min) {
 }
 
 const safeHttpUrl = (u) => { try { const x = new URL(u); return /^https?:$/.test(x.protocol) ? x.toString() : null; } catch { return null; } };
+/** Photo d'une recette : adresse web, ou miniature prise avec l'iPhone (JPEG intégré). */
+const safeImageUrl = (u) => (typeof u === "string" && /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(u) ? u : safeHttpUrl(u));
 const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return ""; } };
 
 const store = {
@@ -1370,11 +1380,24 @@ function renderExtractPanel() {
     submit,
   );
 
+  const photoInput = h("input", {
+    type: "file", accept: "image/*", multiple: true, hidden: true,
+    onchange: (e) => { const files = [...e.target.files]; e.target.value = ""; if (files.length) runPhotoExtraction(files); },
+  });
+  const photo = h("div", { class: "photo-block" },
+    h("div", { class: "or" }, h("span", {}, "ou")),
+    h("button", { class: "btn photo-btn", type: "button", disabled: state.loading, onclick: () => photoInput.click() },
+      icon("camera"), state.loadingPhoto ? "Lecture de la photo…" : "Photo d'une recette"),
+    photoInput,
+    h("p", { class: "hint" }, "Livre, magazine, fiche ou cahier : page bien à plat, photo de face et bien éclairée. Plusieurs photos si la recette tient sur 2 pages. Tout est lu sur l'iPhone, sans IA et sans rien envoyer."));
+
   return h("section", { "aria-label": "Extraire une recette" },
     form,
+    photo,
     state.lastError && h("div", { class: "notice error", role: "alert" }, state.lastError),
+    state.lastError && state.ocrText && h("details", { class: "ocr-text" }, h("summary", {}, "Voir le texte lu sur la photo"), h("pre", {}, state.ocrText.trim())),
     renderLog(),
-    h("p", { class: "hint" }, "Dans Safari : Partager › Copier, puis revenez ici et touchez le bouton Coller."),
+    h("p", { class: "hint" }, "Pour un lien, dans Safari : Partager › Copier, puis revenez ici et touchez le bouton Coller."),
     h("p", { class: "version" }, `letuscook · version ${APP_VERSION}`),
   );
 }
@@ -1445,6 +1468,54 @@ async function runExtraction(raw) {
     if (err.code === "NO_RELAY") openSettings();
   }
 }
+
+/** Miniature JPEG (~600 px) de la 1re photo, gardée avec la recette. */
+function photoThumb(file) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, 640 / Math.max(img.naturalWidth, img.naturalHeight));
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.naturalWidth * scale); c.height = Math.round(img.naturalHeight * scale);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      try { resolve(c.toDataURL("image/jpeg", 0.72)); } catch { resolve(undefined); }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(undefined); };
+    img.src = url;
+  });
+}
+
+/** Photo(s) d'une recette → lecture du texte sur l'iPhone → recette pas à pas (aperçu, puis carnet). */
+async function runPhotoExtraction(files) {
+  if (state.loading) return;
+  Object.assign(state, { loading: true, loadingPhoto: true, log: [], lastError: "", ocrText: "" });
+  renderHome();
+  try {
+    const { text, lines } = await ZBC.readPhotos(files, pushLog);
+    state.ocrText = text;
+    const recipe = ZBC.recipeFromText(text, { lines });
+    if (!recipe) {
+      pushLog("Pas de recette reconnue dans le texte lu", "error");
+      throw new Error(normSpaceUI(text).length < 40
+        ? "Presque aucun texte lu : reprenez la photo plus nette, bien de face, avec plus de lumière."
+        : "Le texte a été lu, mais je n'y reconnais pas de recette (ingrédients avec quantités, étapes).");
+    }
+    recipe.image = await photoThumb(files[0]);
+    pushLog(`Recette découpée : ${recipe.ingredients.length} ingrédient${recipe.ingredients.length > 1 ? "s" : ""}, ${recipe.steps.length} étape${recipe.steps.length > 1 ? "s" : ""}`, recipe.ingredients.length && recipe.steps.length ? "ok" : "warn");
+    const warnings = ["Lue automatiquement sur la photo : vérifiez les quantités avant de cuisiner."];
+    if (!recipe.ingredients.length) warnings.unshift("Aucun ingrédient reconnu.");
+    if (!recipe.steps.length) warnings.unshift("Aucune étape reconnue.");
+    Object.assign(state, { preview: recipe, previewWarnings: warnings, loading: false, loadingPhoto: false });
+    store.del("zbc.progress.apercu");
+    go("#/apercu");
+  } catch (err) {
+    Object.assign(state, { loading: false, loadingPhoto: false, lastError: err.message || "La lecture de la photo a échoué." });
+    renderHome();
+  }
+}
+const normSpaceUI = (t) => String(t || "").replace(/\s+/g, " ").trim();
 
 /* ════════════ Recherche de recettes ════════════ */
 const SEARCH_CONCURRENCY = 5;
@@ -1737,7 +1808,7 @@ function thumbWithImage(cls, url, letter) {
 }
 
 function recipeCard(r) {
-  const thumb = thumbWithImage("thumb", safeHttpUrl(r.image), (r.title || "?").trim().charAt(0).toUpperCase());
+  const thumb = thumbWithImage("thumb", safeImageUrl(r.image), (r.title || "?").trim().charAt(0).toUpperCase());
   const meta = [r.siteName, formatMinutes(r.totalTimeMin)].filter(Boolean).join(" · ");
   return h("a", { class: "card", href: `#/r/${encodeURIComponent(r.id)}` },
     thumb,
@@ -1788,7 +1859,7 @@ function renderRecipe(recipe, { saved }) {
 
   /* En-tête */
   const header = [];
-  const img = safeHttpUrl(recipe.image);
+  const img = safeImageUrl(recipe.image);
   if (img) {
     const figure = h("div", { class: "r-image" });
     const el = h("img", { src: img, alt: "", referrerpolicy: "no-referrer" });
@@ -1817,6 +1888,7 @@ function renderRecipe(recipe, { saved }) {
   const VIA = {
     jsonld: "données structurées du site (sans IA)",
     html: "lecture du texte de la page (sans IA)",
+    photo: "lecture de la photo sur l'iPhone (sans IA)",
     llm: `analyse IA${recipe.aiProvider ? ` (${{ gemini: "Gemini", mistral: "Mistral", anthropic: "Claude", openai: "ChatGPT" }[recipe.aiProvider] || recipe.aiProvider})` : ""}`,
   };
   if (VIA[recipe.extractedVia]) header.push(h("p", { class: "via" }, `Extraite par ${VIA[recipe.extractedVia]}`));
