@@ -599,14 +599,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js"></script>
-<script src="extracteur.js"></script>
+<script src="config.js?v=2.8.1"></script>
+<script src="extracteur.js?v=2.8.1"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.8.0";
+const APP_VERSION = "2.8.1";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1490,6 +1490,10 @@ function photoThumb(file) {
 /** Photo(s) d'une recette → lecture du texte sur l'iPhone → recette pas à pas (aperçu, puis carnet). */
 async function runPhotoExtraction(files) {
   if (state.loading) return;
+  if (typeof ZBC.readPhotos !== "function") { // ancien moteur encore en cache
+    state.lastError = "L'appli n'a pas fini de se mettre à jour : fermez-la complètement (balayez-la vers le haut) puis rouvrez-la.";
+    return renderHome();
+  }
   Object.assign(state, { loading: true, loadingPhoto: true, log: [], lastError: "", ocrText: "" });
   renderHome();
   try {

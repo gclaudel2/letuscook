@@ -5,7 +5,7 @@
  * - Les recettes elles-mêmes sont dans IndexedDB (pas ici)
  * Changer VERSION à chaque mise en ligne d'une nouvelle version force le renouvellement du cache.
  */
-const VERSION = "zbc-2.8.0"; // = APP_VERSION dans index.html
+const VERSION = "zbc-2.8.1"; // = APP_VERSION dans index.html
 const IMAGE_CACHE = "zbc-images";
 const FONT_CACHE = "zbc-fonts"; // polices des thèmes (Google Fonts) et module de lecture des photos, gardés pour le hors ligne
 const MAX_IMAGES = 200;
@@ -44,7 +44,8 @@ function withTimeout(promise, ms) {
 async function networkFirst(request, isNavigation) {
   const cache = await caches.open(VERSION);
   try {
-    const response = await withTimeout(fetch(request), NETWORK_TIMEOUT_MS);
+    // no-cache : on revalide auprès du serveur (sinon le cache HTTP de GitHub Pages peut servir un vieux fichier 10 min)
+    const response = await withTimeout(fetch(request.url, { cache: "no-cache", credentials: "same-origin" }), NETWORK_TIMEOUT_MS);
     if (response.ok) cache.put(request, response.clone());
     return response;
   } catch {
