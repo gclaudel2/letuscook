@@ -301,6 +301,8 @@
     -webkit-backdrop-filter: saturate(1.4) blur(14px); backdrop-filter: saturate(1.4) blur(14px);
     border-top: 1px solid var(--line);
   }
+  .cook-bar { transition: transform 0.28s ease, opacity 0.28s ease; }
+  .cook-bar.hidden { transform: translateY(110%); opacity: 0; pointer-events: none; }
   .cook-bar.flash { animation: barflash 0.5s ease-out; }
   @keyframes barflash { from { background: var(--accent-soft); } }
   .nav-btn { flex: none; width: 54px; height: 54px; border-radius: 50%; border: 0; background: var(--line); color: var(--ink); display: grid; place-items: center; }
@@ -424,7 +426,7 @@
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.0.0";
+const APP_VERSION = "2.0.1";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -866,6 +868,20 @@ document.addEventListener("visibilitychange", () => {
   if (HandsFree.voiceOn) HandsFree.listen();
   if (HandsFree.gestureOn && (!HandsFree.stream || HandsFree.stream.getVideoTracks().every((t) => t.readyState === "ended"))) HandsFree.startGesture(true);
 });
+
+/* Bandeau du bas : visible une fois arrivé aux étapes (ou si la voix / le geste sont actifs) */
+let cookBarAnchor = null;
+function updateCookBarVisibility() {
+  const bar = document.getElementById("cook-bar");
+  if (!bar || !cookBarAnchor || !cookBarAnchor.isConnected) return;
+  const reached = cookBarAnchor.getBoundingClientRect().top < window.innerHeight * 0.8;
+  const show = reached || HandsFree.voiceOn || HandsFree.gestureOn;
+  bar.classList.toggle("hidden", !show);
+  bar.setAttribute("aria-hidden", String(!show));
+  bar.inert = !show;
+}
+window.addEventListener("scroll", updateCookBarVisibility, { passive: true });
+window.addEventListener("resize", updateCookBarVisibility);
 
 /* ════════════ Navigation ════════════ */
 function go(hash, replace = false) {
@@ -1476,6 +1492,7 @@ function renderRecipe(recipe, { saved }) {
   }
 
   /* Barre mains libres (en bas de l'écran) */
+  const stepsTitle = h("div", { class: "section-title" }, h("h2", {}, "Préparation"));
   const stepSpeech = (i) => (recipe.steps[i] ? `Étape ${i + 1}. ${recipe.steps[i].text}` : "");
   const goStep = (i) => {
     if (!recipe.steps.length) return;
@@ -1502,6 +1519,7 @@ function renderRecipe(recipe, { saved }) {
     micBtn, handBtn, readBtn,
     barNext);
   function refreshBar() {
+    updateCookBarVisibility();
     const n = recipe.steps.length;
     barLabel.textContent = activeStep >= 0 ? `Étape ${activeStep + 1} / ${n}` : `${n} étape${n > 1 ? "s" : ""}`;
     const modes = [HandsFree.voiceOn && "voix", HandsFree.gestureOn && "geste", HandsFree.readOn && "lecture"].filter(Boolean);
@@ -1543,13 +1561,13 @@ function renderRecipe(recipe, { saved }) {
     recipe.ingredients.length ? resetBtn : null,
     recipe.ingredients.length && h("div", { class: "section-title" }, h("h2", {}, "Ingrédients"), ingProgress),
     recipe.ingredients.length && h("ul", { class: "ingredients" }, ingNodes),
-    recipe.steps.length && h("div", { class: "section-title" }, h("h2", {}, "Préparation")),
+    recipe.steps.length && stepsTitle,
     recipe.steps.length && h("p", { class: "step-hint" }, "Touchez l'étape en cours pour la repérer."),
     recipe.steps.length && h("ol", { class: "steps" }, stepNodes),
     footer,
   ].filter(Boolean);
 
-  if (recipe.steps.length) content.push(cookBar);
+  if (recipe.steps.length) { content.push(cookBar); cookBarAnchor = stepsTitle; }
   setView(toolbar.filter(Boolean), content);
   document.body.classList.toggle("has-cookbar", recipe.steps.length > 0);
   HandsFree.attach({
@@ -1563,6 +1581,7 @@ function renderRecipe(recipe, { saved }) {
   updateIngProgress();
   updateServings();
   setActive(activeStep, false);
+  updateCookBarVisibility();
   refreshWakeButton();
   document.title = `${recipe.title} · Zéro Blabla Cuisine`;
 }
