@@ -372,6 +372,65 @@
     return m ? normalizeDifficulty(m[1]) : undefined;
   }
 
+
+  // ── Recettes de chefs ──────────────────────────────────────────
+  /** Minuscules sans accents (comparaisons de texte). */
+  const fold = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/œ/g, "oe").replace(/æ/g, "ae");
+  /* Grands chefs (étoilés Michelin, Meilleurs Ouvriers de France, pâtissiers renommés). */
+  const CHEFS = [
+    "Paul Bocuse", "Alain Ducasse", "Joël Robuchon", "Pierre Gagnaire", "Alain Passard", "Guy Savoy", "Anne-Sophie Pic",
+    "Hélène Darroze", "Yannick Alléno", "Thierry Marx", "Michel Guérard", "Georges Blanc", "Régis Marcon", "Jacques Marcon",
+    "Michel Bras", "Sébastien Bras", "Marc Veyrat", "Emmanuel Renaut", "Jean Sulpice", "Glenn Viel", "Mauro Colagreco",
+    "Arnaud Lallement", "Arnaud Donckele", "Christopher Coutanceau", "Olivier Nasti", "Michel Troisgros", "César Troisgros",
+    "Alexandre Mazzia", "Eric Fréchon", "Éric Fréchon", "Christian Le Squer", "Jean-François Piège", "Christian Constant",
+    "Philippe Etchebest", "Cyril Lignac", "Mory Sacko", "Stéphanie Le Quellec", "Amandine Chaignot", "Julia Sedefdjian",
+    "Dominique Crenn", "Georgiana Viou", "Nadia Sammut", "Fanny Rey", "Jacques Maximin", "Bernard Loiseau", "Patrick Bertron",
+    "Paul Haeberlin", "Marc Haeberlin", "Jean-Georges Klein", "Gilles Goujon", "Jean-Luc Rabanel", "Gérald Passédat",
+    "Edouard Loubet", "Édouard Loubet", "Pascal Barbot", "David Toutain", "Eric Pras", "Éric Pras", "Michel Sarran",
+    "Guillaume Gomez", "Jean-Pierre Coffe", "Frédéric Anton", "Philippe Faure-Brac", "Akrame Benallal", "Pierre Sang",
+    "Juan Arbelaez", "Norbert Tarayre", "Jean-François Mallet", "Hugo Roellinger", "Olivier Roellinger", "Christophe Hay",
+    "Alexandre Couillon", "Jean-André Charial", "Romain Meder", "Paul Pairet", "Gordon Ramsay", "Massimo Bottura",
+    "Ferran Adrià", "Heston Blumenthal", "Yotam Ottolenghi", "Jamie Oliver",
+    // Pâtissiers
+    "Pierre Hermé", "Christophe Michalak", "Cédric Grolet", "Philippe Conticini", "Christophe Felder", "Christophe Adam",
+    "Jean-Paul Hévin", "Pierre Marcolini", "Yann Couvreur", "Nina Métayer", "Claire Heitzler", "Jessica Préalpato",
+    "Nicolas Paciello", "François Perret", "Pierre Lecoq", "Gaston Lenôtre", "Philippe Urraca", "Jacques Génin",
+    "Patrick Roger", "Sébastien Gaudard", "Fabrice Le Bourdat", "Arnaud Larher", "Gontran Cherrier", "Eric Kayser",
+  ];
+  const chefKey = (n) => fold(n).replace(/[-\s]+/g, " ").trim();
+  const CHEF_INDEX = new Map(CHEFS.map((n) => [chefKey(n), n]));
+  const CHEF_RE = new RegExp(`(?:^|[^a-z])(${[...CHEF_INDEX.keys()].map((k) => k.replace(/ /g, "[\\s-]+")).join("|")})(?![a-z])`);
+
+  function authorNames(a) {
+    if (!a) return [];
+    if (typeof a === "string") return [a];
+    if (Array.isArray(a)) return a.flatMap(authorNames);
+    if (typeof a === "object") return authorNames(a.name);
+    return [];
+  }
+  /** "… du chef Jean Dupont" → "Jean Dupont" */
+  const CHEF_IN_TITLE = /\bchefs?\s+(?:étoilé\s+|pâtissier\s+)?([A-ZÀ-Ý][\wà-ÿ'’-]+(?:\s+(?:de\s+|le\s+|la\s+)?[A-ZÀ-Ý][\wà-ÿ'’-]+){1,2})/;
+
+  /** Nom du chef de la recette, s'il est connu ; sinon undefined. */
+  function detectChef(node, doc, meta) {
+    const authors = authorNames(node && node.author).map(normSpace).filter(Boolean);
+    const h1 = normSpace(doc.querySelector("h1")?.textContent);
+    const intro = normSpace((doc.querySelector("article, main, [role=main]") || doc.body || doc.documentElement).textContent).slice(0, 1500);
+    // 1. Nom connu dans l'auteur, le titre, la description ou le début de l'article
+    for (const text of [authors.join(" "), node && node.name, h1, meta.title, node && node.description, meta.description, intro]) {
+      const m = CHEF_RE.exec(fold(text || "").replace(/[-\s]+/g, " "));
+      if (m) return CHEF_INDEX.get(m[1].replace(/[\s-]+/g, " ")) || undefined;
+    }
+    // 2. "Recette du chef Jean Dupont" dans le titre
+    for (const text of [h1, node && node.name, meta.title]) {
+      const m = CHEF_IN_TITLE.exec(normSpace(text));
+      if (m) return m[1];
+    }
+    // 3. Auteur qui se présente comme chef ("Chef Damien")
+    const chefAuthor = authors.find((a) => /\bchef\b/i.test(a) && a.length <= 60);
+    return chefAuthor ? chefAuthor.replace(/^\s*(?:le\s+)?chef\s+/i, "") : undefined;
+  }
+
   // ── Métadonnées et texte principal (pour l'IA) ─────────────────
   function getPageMeta(doc, pageUrl) {
     const meta = (...sels) => {
@@ -737,7 +796,8 @@
 
     log("Recherche des données structurées de la recette (schema.org)…", "run");
     const candidates = findJsonLdRecipes(doc);
-    let recipe = candidates.length ? jsonLdToRecipe(pickBestCandidate(candidates), sourceUrl, meta) : null;
+    const bestNode = candidates.length ? pickBestCandidate(candidates) : null;
+    let recipe = bestNode ? jsonLdToRecipe(bestNode, sourceUrl, meta) : null;
     if (isComplete(recipe)) log(`Données structurées trouvées : ${counts(recipe)}`, "ok");
     else if (recipe) log(`Données structurées incomplètes (${counts(recipe)})`, "warn");
     else log("Pas de données structurées sur cette page", "info");
@@ -756,6 +816,10 @@
     }
     if (recipe && !recipe.difficulty) {
       try { recipe.difficulty = findDifficultyInPage(doc); } catch { /* facultatif */ }
+    }
+    if (recipe) {
+      try { recipe.chef = detectChef(bestNode, doc, meta); } catch { /* facultatif */ }
+      if (recipe.chef) log(`Recette du chef ${recipe.chef}`, "info");
     }
     return { recipe, complete: isComplete(recipe), meta, getText: () => extractMainText(doc) };
   }
@@ -851,7 +915,16 @@
     { id: "herve", name: "Hervé Cuisine", host: "www.hervecuisine.com", urls: ["https://www.hervecuisine.com/?s={q}"] },
     { id: "ietflp", name: "Il était une fois la pâtisserie", host: "www.iletaitunefoislapatisserie.com", urls: ["https://www.iletaitunefoislapatisserie.com/?s={q}"] },
     { id: "ptitchef", name: "Ptitchef", host: "www.ptitchef.com", urls: ["https://www.ptitchef.com/recettes/recherche?q={q}", "https://www.ptitchef.com/recherche?q={q}"] },
+    // Recettes de chefs (étoilés et grands noms)
+    { id: "michelin", name: "Guide Michelin", host: "guide.michelin.com", chef: true, urls: ["https://guide.michelin.com/fr/fr/articles?q={q}", "https://guide.michelin.com/fr/fr/search?q={q}"] },
+    { id: "madamefigaro", name: "Madame Figaro", host: "madame.lefigaro.fr", chef: true, urls: ["https://madame.lefigaro.fr/recherche?q={q}", "https://madame.lefigaro.fr/recherche/{q}"] },
+    { id: "cvf", name: "Cuisine et Vins de France", host: "www.cuisineetvinsdefrance.com", chef: true, urls: ["https://www.cuisineetvinsdefrance.com/recherche?q={q}", "https://www.cuisineetvinsdefrance.com/?s={q}"] },
+    { id: "atelierdeschefs", name: "L'Atelier des Chefs", host: "www.atelierdeschefs.fr", chef: true, urls: ["https://www.atelierdeschefs.fr/fr/recherche?q={q}", "https://www.atelierdeschefs.fr/recherche?q={q}"] },
   ];
+  // Les sites ajoutés dans une nouvelle version rejoignent aussi les listes déjà personnalisées
+  const SITES_VERSION = 2;
+  const SITES_VERSION_KEY = "zbc.sites.version";
+  const SITES_REMOVED_KEY = "zbc.sites.removed";
   const SITES_KEY = "zbc.sites";
 
   /** "https://www.Elle.fr/Elle-a-Table" ou "elle.fr" → "www.elle.fr" / "elle.fr" */
@@ -868,15 +941,32 @@
   function getSearchSites() {
     try {
       const stored = JSON.parse(localStorage.getItem(SITES_KEY) || "null");
-      if (Array.isArray(stored)) return stored.filter((x) => x && x.host);
+      if (Array.isArray(stored)) {
+        let list = stored.filter((x) => x && x.host);
+        if (Number(localStorage.getItem(SITES_VERSION_KEY) || 1) < SITES_VERSION) {
+          const removed = JSON.parse(localStorage.getItem(SITES_REMOVED_KEY) || "[]");
+          const ids = new Set(list.map((x) => x.id));
+          list = list.concat(DEFAULT_SEARCH_SITES.filter((d) => !ids.has(d.id) && !removed.includes(d.id)).map((d) => ({ ...d, enabled: true })));
+          localStorage.setItem(SITES_KEY, JSON.stringify(list));
+          localStorage.setItem(SITES_VERSION_KEY, String(SITES_VERSION));
+        }
+        return list;
+      }
     } catch { /* liste illisible : on repart de l'origine */ }
     return DEFAULT_SEARCH_SITES.map((x) => ({ ...x, enabled: true }));
   }
+  /** Mémorise qu'un site d'origine a été supprimé (pour ne pas le rajouter lors d'une mise à jour). */
+  function rememberRemovedSite(id) {
+    try {
+      const removed = JSON.parse(localStorage.getItem(SITES_REMOVED_KEY) || "[]");
+      if (!removed.includes(id)) localStorage.setItem(SITES_REMOVED_KEY, JSON.stringify(removed.concat(id)));
+    } catch { /* */ }
+  }
   function saveSearchSites(list) {
-    try { localStorage.setItem(SITES_KEY, JSON.stringify(list)); } catch { /* stockage indisponible */ }
+    try { localStorage.setItem(SITES_KEY, JSON.stringify(list)); localStorage.setItem(SITES_VERSION_KEY, String(SITES_VERSION)); } catch { /* stockage indisponible */ }
   }
   function resetSearchSites() {
-    try { localStorage.removeItem(SITES_KEY); } catch { /* */ }
+    try { localStorage.removeItem(SITES_KEY); localStorage.removeItem(SITES_REMOVED_KEY); } catch { /* */ }
   }
   /** Prépare un site pour la recherche (adresses → fonctions, forme des recettes → RegExp). */
   function compileSite(raw) {
@@ -886,6 +976,7 @@
     return {
       name: raw.name || raw.host,
       host: raw.host,
+      chef: !!raw.chef,
       recipe,
       url: (templates.length ? templates : guessSearchUrls(raw.host)).map((t) => (q) => t.split("{q}").join(enc(q))),
     };
@@ -894,7 +985,6 @@
   const PER_SITE = 3;
   const MAX_RESULTS = 15;
 
-  const fold = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/œ/g, "oe").replace(/æ/g, "ae");
   const STOP = new Set(["recette", "recettes", "avec", "sans", "pour", "les", "des", "aux", "une", "facile", "rapide", "maison"]);
   function queryWords(q) {
     return fold(q).split(/[^a-z0-9]+/).filter((w) => w.length >= 3 && !STOP.has(w)).map((w) => w.replace(/(?:s|x)$/, ""));
@@ -995,7 +1085,7 @@
       const path = new URL(url).pathname;
       const t = info.title || titleFromSlug(path);
       if (!matchesQuery(`${t} ${path}`, words)) continue;
-      out.push({ url, title: t, image: info.image || undefined, site: site.name });
+      out.push({ url, title: t, image: info.image || undefined, site: site.name, chefSite: site.chef || undefined });
       if (out.length >= PER_SITE) break;
     }
     return out;
@@ -1065,7 +1155,7 @@
 
   window.ZBC = {
     CONFIG, ACCESS_CODE_KEY, WORKER_URL_KEY, getWorkerUrl, ExtractError,
-    extractRecipe, extractFromHtml, parseTargetUrl, searchRecipes, analyzeUrl, synthesize, getSearchSites, saveSearchSites, resetSearchSites, normalizeHost, testSearchSite, DEFAULT_SEARCH_SITES,
+    extractRecipe, extractFromHtml, parseTargetUrl, searchRecipes, analyzeUrl, synthesize, getSearchSites, saveSearchSites, resetSearchSites, rememberRemovedSite, normalizeHost, testSearchSite, DEFAULT_SEARCH_SITES,
     parseIngredient, formatIngredient, formatQuantity, parseDuration, parseServings,
   };
 })();

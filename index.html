@@ -259,7 +259,7 @@
   .segs { display: flex; gap: 4px; padding: 4px; border-radius: 12px; background: var(--line); }
   .seg { flex: 1; height: 36px; border: 0; border-radius: 9px; background: transparent; font-size: 14px; font-weight: 650; color: var(--muted); }
   .seg[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgb(0 0 0 / 0.12); }
-  .filters { display: flex; gap: 8px; }
+  .filters { display: flex; gap: 8px; flex-wrap: wrap; }
   .filter { height: 36px; padding: 0 14px; border-radius: 999px; border: 1.5px solid var(--line); background: var(--surface); font-size: 14px; font-weight: 650; }
   .filter[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
   .results { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
@@ -282,6 +282,9 @@
   .rating svg { width: 14px; height: 14px; color: #E2A100; }
   .badge { padding: 1px 8px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font-size: 12px; font-weight: 700; }
   .badge.soft { background: var(--line); color: var(--muted); }
+  .badge.chef { background: #1B1714; color: #F4D58D; }
+  @media (prefers-color-scheme: dark) { .badge.chef { background: #F4D58D; color: #1B1714; } }
+  .r-chef { margin: 4px 0 -4px; font: italic 600 16px/1.3 var(--serif); color: var(--accent); }
   .facts { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 2px; font-size: 14px; }
   .facts.muted { color: var(--muted); font-size: 13px; }
   .fact { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
@@ -426,7 +429,7 @@
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.1.0";
+const APP_VERSION = "2.2.0";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -547,7 +550,7 @@ const state = {
   log: [],            // journal de la dernière extraction : { message, status, ms }
   search: {           // moteur de recherche
     q: "", id: 0, loading: false, error: "", results: [], sources: [],
-    sort: "pertinence", quick: false, easy: false, scrollY: 0,
+    sort: "pertinence", quick: false, easy: false, chef: false, scrollY: 0,
   },
 };
 
@@ -1242,7 +1245,7 @@ function renderSearchControls() {
   }, label);
   return h("div", { class: "search-controls", id: "search-controls" },
     h("div", { class: "segs", role: "group", "aria-label": "Trier" }, seg("pertinence", "Pertinence"), seg("rapide", "Plus rapides"), seg("note", "Mieux notées")),
-    h("div", { class: "filters", role: "group", "aria-label": "Filtres" }, chip("quick", "≤ 30 min"), chip("easy", "Facile")),
+    h("div", { class: "filters", role: "group", "aria-label": "Filtres" }, chip("quick", "≤ 30 min"), chip("easy", "Facile"), chip("chef", "Chef")),
   );
 }
 
@@ -1251,6 +1254,7 @@ function visibleResults() {
   let list = S.results.slice();
   if (S.quick) list = list.filter((r) => r.status === "ok" && totalMinutes(r.recipe) != null && totalMinutes(r.recipe) <= 30);
   if (S.easy) list = list.filter((r) => r.status === "ok" && isEasy(r.recipe));
+  if (S.chef) list = list.filter((r) => r.status === "ok" && (r.recipe.chef || r.chefSite));
   const rank = (r) => (r.status === "ok" ? 0 : r.status === "pending" || r.status === "loading" ? 1 : r.status === "partial" ? 2 : 3);
   const score = (r) => {
     if (S.sort === "rapide") return totalMinutes(r.recipe) ?? 1e6;
@@ -1271,7 +1275,11 @@ function refreshResults(controlsToo = false) {
   const status = document.getElementById("search-status");
   if (status) status.textContent = searchStatusText();
   if (controlsToo) document.getElementById("search-controls")?.replaceWith(renderSearchControls());
-  if (!list.children.length) list.append(h("li", { class: "empty" }, "Aucune recette ne correspond à ces filtres."));
+  if (!list.children.length) {
+    list.append(h("li", { class: "empty" }, state.search.chef
+      ? "Aucune recette de chef pour cette recherche. Essayez un plat plus classique (ex. « blanquette », « tarte au citron »)."
+      : "Aucune recette ne correspond à ces filtres."));
+  }
 }
 
 function fact(iconName, text, strong) {
@@ -1308,6 +1316,7 @@ function resultCard(res) {
     facts = h("div", { class: "facts muted" }, res.error || "Recette non détectée automatiquement");
   }
 
+  const chefBadge = r && r.chef ? h("span", { class: "badge chef" }, `Chef ${r.chef}`) : res.chefSite && res.status === "ok" ? h("span", { class: "badge chef" }, "Recette de chef") : null;
   const badge = saved ? h("span", { class: "badge" }, "Dans le carnet")
     : res.status === "partial" ? h("span", { class: "badge soft" }, "À extraire")
     : res.status === "fail" ? h("span", { class: "badge soft" }, "Réessayer")
@@ -1318,7 +1327,7 @@ function resultCard(res) {
       thumb,
       h("div", { class: "r-body" },
         h("div", { class: "r-name" }, title),
-        h("div", { class: "r-meta" }, meta, badge),
+        h("div", { class: "r-meta" }, meta, chefBadge, badge),
         facts),
     ));
 }
@@ -1495,6 +1504,7 @@ function renderRecipe(recipe, { saved }) {
     figure.append(el);
     header.push(figure);
   }
+  if (recipe.chef) header.push(h("p", { class: "r-chef" }, `Recette du chef ${recipe.chef}`));
   header.push(h("h1", { class: "r-title" }, recipe.title));
   const chips = [
     recipe.prepTimeMin != null && ["Préparation", recipe.prepTimeMin],
@@ -1808,7 +1818,7 @@ function siteEditor(site) {
         } }, "Enregistrer"),
         !isNew && h("button", { type: "button", class: "btn small danger", onclick: () => {
           if (!confirm(`Retirer ${site.name} de la recherche ?`)) return;
-          sitesUI.editing = null; updateSites((list) => { const i = list.findIndex((x) => x.id === site.id); if (i >= 0) list.splice(i, 1); }); toast("Site retiré");
+          sitesUI.editing = null; ZBC.rememberRemovedSite(site.id); updateSites((list) => { const i = list.findIndex((x) => x.id === site.id); if (i >= 0) list.splice(i, 1); }); toast("Site retiré");
         } }, "Supprimer"),
         h("button", { type: "button", class: "btn small ghost", onclick: () => { sitesUI.editing = null; sitesUI.test = null; renderSitesManager(); } }, "Annuler"),
       ),
