@@ -426,7 +426,7 @@
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.0.1";
+const APP_VERSION = "2.0.2";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -681,6 +681,53 @@ function motionBetween(gray, prev) {
 
 const GESTURE_LEVELS = { faible: 0.38, normale: 0.26, forte: 0.16 };
 
+/**
+ * Son même en mode silencieux (bouton vibreur) : iOS coupe le son "d'ambiance" des pages web,
+ * mais pas celui des lecteurs audio. Pendant la lecture, on passe la session audio en
+ * "playback" (iOS 17+) et on joue en boucle un son muet dans un vrai lecteur audio.
+ * Revers : comme une appli de podcast, cela met en pause la musique d'une autre appli.
+ */
+const Sound = {
+  el: null, active: false, unlocked: false,
+  silentWavUrl() {
+    const rate = 8000, n = rate / 2; // 0,5 s de silence
+    const buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
+    const w = (o, str) => { for (let i = 0; i < str.length; i++) v.setUint8(o + i, str.charCodeAt(i)); };
+    w(0, "RIFF"); v.setUint32(4, 36 + n * 2, true); w(8, "WAVE"); w(12, "fmt ");
+    v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+    v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+    w(36, "data"); v.setUint32(40, n * 2, true);
+    return URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
+  },
+  player() {
+    if (!this.el) {
+      this.el = new Audio(this.silentWavUrl());
+      this.el.loop = true;
+      this.el.setAttribute("playsinline", "");
+      this.el.preload = "auto";
+    }
+    return this.el;
+  },
+  setSessionType(type) { try { if (navigator.audioSession) navigator.audioSession.type = type; } catch { /* iOS < 17 */ } },
+  /** À appeler lors d'un toucher : autorise ensuite la lecture sans nouveau toucher. */
+  unlock() {
+    if (this.unlocked) return;
+    const el = this.player();
+    el.play().then(() => { this.unlocked = true; if (!this.active) el.pause(); }).catch(() => {});
+  },
+  /** Active le son malgré le mode silencieux. */
+  start() {
+    this.active = true;
+    this.setSessionType("playback");
+    this.player().play().then(() => { this.unlocked = true; }).catch(() => {});
+  },
+  stop() {
+    this.active = false;
+    if (this.el) this.el.pause();
+    this.setSessionType("auto");
+  },
+};
+
 const HandsFree = {
   ctx: null,                       // fourni par le mode cuisine
   voiceOn: false, gestureOn: false, readOn: false,
@@ -700,8 +747,9 @@ const HandsFree = {
     this.refresh();
   },
   detach() {
+    this.readOn = false;
     this.stopVoice(); this.stopGesture(); this.stopReading();
-    this.readOn = false; this.ctx = null;
+    Sound.stop(); this.ctx = null;
   },
 
   /* ── retours visuels et sonores ── */
@@ -709,6 +757,7 @@ const HandsFree = {
   refresh() { if (this.ctx && this.ctx.refreshBar) this.ctx.refreshBar(); },
   beep(freq = 880) {
     try {
+      if (!Sound.active) Sound.setSessionType("playback");
       this.audio = this.audio || new (window.AudioContext || window.webkitAudioContext)();
       const o = this.audio.createOscillator(), g = this.audio.createGain();
       o.frequency.value = freq; g.gain.value = 0.06;
@@ -785,6 +834,7 @@ const HandsFree = {
   speak(text, force = false) {
     if (!text || !this.readSupported || (!this.readOn && !force)) return;
     try {
+      Sound.start(); // audible même en mode silencieux
       speechSynthesis.cancel();
       const u = new SpeechSynthesisUtterance(text);
       u.lang = "fr-FR";
@@ -793,15 +843,26 @@ const HandsFree = {
       // Le micro est coupé pendant la lecture, sinon l'appli s'écouterait elle-même
       this.speaking = true;
       if (this.rec) { try { this.rec.abort(); } catch { /* */ } }
-      const done = () => { this.speaking = false; if (this.voiceOn) this.restartTimer = setTimeout(() => this.listen(), 300); };
+      const done = () => {
+        this.speaking = false;
+        if (!this.readOn) Sound.stop(); // lecture ponctuelle ("répète") : on rend la main à la musique
+        if (this.voiceOn) this.restartTimer = setTimeout(() => this.listen(), 300);
+      };
       u.onend = done; u.onerror = done;
       speechSynthesis.speak(u);
     } catch { this.speaking = false; }
   },
-  stopReading() { this.speaking = false; try { speechSynthesis.cancel(); } catch { /* */ } if (this.voiceOn) this.listen(); },
+  stopReading() {
+    this.speaking = false;
+    try { speechSynthesis.cancel(); } catch { /* */ }
+    if (!this.readOn) Sound.stop();
+    if (this.voiceOn) this.listen();
+  },
   toggleRead() {
     if (!this.readSupported) { toast("La lecture à voix haute n'est pas disponible sur cet appareil."); return; }
     this.readOn = !this.readOn;
+    if (this.readOn) Sound.start(); // ce toucher autorise le son pour la suite
+    else Sound.stop();
     if (this.readOn) this.speak(this.ctx ? this.ctx.currentText() || "Lecture des étapes activée." : "", true);
     else this.stopReading();
     this.refresh();
@@ -1504,10 +1565,12 @@ function renderRecipe(recipe, { saved }) {
   const barPrev = h("button", { class: "nav-btn", type: "button", "aria-label": "Étape précédente", onclick: () => goStep(activeStep - 1) }, icon("prev"));
   const barNext = h("button", { class: "nav-btn primary", type: "button", "aria-label": "Étape suivante", onclick: () => goStep(activeStep + 1) }, icon("next"));
   const micBtn = h("button", { class: "hf-btn", type: "button", "aria-label": "Commande vocale", onclick: () => {
+    Sound.unlock(); // pour que « répète » soit audible même en mode silencieux
     if (HandsFree.voiceOn) { HandsFree.stopVoice(); HandsFree.setStatus(""); }
     else if (HandsFree.startVoice() && !Wake.wanted && Wake.supported) Wake.enable(true);
   } }, icon("mic"));
   const handBtn = h("button", { class: "hf-btn", type: "button", "aria-label": "Geste de la main (caméra)", onclick: async () => {
+    Sound.unlock();
     if (HandsFree.gestureOn) { HandsFree.stopGesture(); HandsFree.setStatus(""); }
     else if (await HandsFree.startGesture() && !Wake.wanted && Wake.supported) Wake.enable(true);
   } }, icon("hand"));
