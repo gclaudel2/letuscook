@@ -403,6 +403,11 @@
       <p>Si l'étape avance toute seule quand vous bougez dans la cuisine, choisissez « Faible ».</p>
     </div>
     <div class="group">
+      <span class="field-label">Recettes de chefs (index)</span>
+      <div id="chef-index"></div>
+      <p>Ces sites n'ont pas de moteur de recherche : l'appli parcourt leurs recettes une fois par semaine et les garde sur cet appareil, pour les retrouver instantanément.</p>
+    </div>
+    <div class="group">
       <span class="field-label">Sites de recherche <small id="sites-count" class="muted-inline"></small></span>
       <div id="sites-manager"></div>
       <p>Les sites désactivés ne sont pas interrogés. Ces choix sont enregistrés sur cet appareil.</p>
@@ -431,7 +436,7 @@
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.2.1";
+const APP_VERSION = "2.3.0";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1279,9 +1284,10 @@ function renderSearchPanel() {
 
 function sourcesText() {
   const S = state.search;
+  const indexNote = chefIndexUI.running ? " · index des chefs en cours de constitution" : "";
   const ok = S.sources.filter((x) => !x.error && x.count > 0).map((x) => `${x.name} (${x.count})`);
   const ko = S.sources.filter((x) => x.error).map((x) => x.name);
-  return [ok.length && `Trouvé sur ${ok.join(", ")}`, ko.length && `inaccessible${ko.length > 1 ? "s" : ""} : ${ko.join(", ")}`].filter(Boolean).join(" · ");
+  return [ok.length && `Trouvé sur ${ok.join(", ")}`, ko.length && `inaccessible${ko.length > 1 ? "s" : ""} : ${ko.join(", ")}`].filter(Boolean).join(" · ") + indexNote;
 }
 
 function searchStatusText() {
@@ -1885,6 +1891,58 @@ function siteEditor(site) {
     ));
 }
 
+/* ════════════ Index des recettes de chefs ════════════ */
+const chefIndexUI = { running: false, progress: "" };
+
+function formatDate(ts) {
+  if (!ts) return "jamais";
+  const d = new Date(ts);
+  return d.toLocaleDateString("fr-FR", { day: "numeric", month: "short" }) + " " + d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+}
+
+function renderChefIndex() {
+  const box = document.getElementById("chef-index");
+  if (!box) return;
+  const status = ZBC.chefIndexStatus();
+  const total = status.filter((x) => x.enabled).reduce((n, x) => n + x.count, 0);
+  const rows = status.map((src) => {
+    const toggle = h("input", { type: "checkbox", checked: src.enabled, "aria-label": `Utiliser ${src.name}` });
+    toggle.addEventListener("change", () => {
+      ZBC.setChefSourceEnabled(src.id, toggle.checked);
+      renderChefIndex();
+      if (toggle.checked && !src.count) runChefIndex(false);
+    });
+    const detail = src.error ? `⚠️ ${src.error}` : src.count ? `${src.count} recettes · ${formatDate(src.at)}` : "pas encore indexé";
+    return h("li", { class: `site${src.enabled ? "" : " off"}` },
+      h("label", { class: "switch" }, toggle, h("span", { class: "slider", "aria-hidden": "true" })),
+      h("div", { class: "site-info" }, h("strong", {}, src.name), h("small", {}, detail)));
+  });
+  box.replaceChildren(
+    h("ul", { class: "sites" }, rows),
+    h("p", { class: "site-test", "aria-live": "polite" }, chefIndexUI.running ? chefIndexUI.progress || "Mise à jour…" : `${total} recettes de chefs disponibles hors recherche`),
+    h("button", { type: "button", class: "btn add-site", disabled: chefIndexUI.running, onclick: () => runChefIndex(true) },
+      chefIndexUI.running ? [h("span", { class: "spinner", "aria-hidden": "true" }), "Mise à jour en cours…"] : "Mettre à jour maintenant"),
+  );
+}
+
+async function runChefIndex(force) {
+  if (chefIndexUI.running || !ZBC.getWorkerUrl()) return;
+  chefIndexUI.running = true; chefIndexUI.progress = "";
+  renderChefIndex();
+  try {
+    await ZBC.refreshChefIndex({ force, onProgress: (p) => {
+      chefIndexUI.progress = p.page ? `${p.site} : page ${p.page}, ${p.count} recettes…` : `${p.done}/${p.total} sources à jour`;
+      const line = document.querySelector("#chef-index .site-test");
+      if (line) line.textContent = chefIndexUI.progress;
+    } });
+    if (force) toast("Index des recettes de chefs à jour");
+  } catch (err) {
+    if (force) toast(err.message || "Mise à jour impossible");
+  }
+  chefIndexUI.running = false;
+  renderChefIndex();
+}
+
 /* ════════════ Réglages ════════════ */
 function openSettings() {
   let worker = "", code = "";
@@ -1896,6 +1954,7 @@ function openSettings() {
   sitesUI.editing = null; sitesUI.test = null;
   renderSitesManager();
   $("#set-gesture").value = store.get("zbc.gestureLevel", "normale");
+  renderChefIndex();
   const dlg = $("#settings");
   if (typeof dlg.showModal === "function") dlg.showModal();
 }
@@ -1952,6 +2011,8 @@ window.addEventListener("scroll", () => $("#topbar").classList.toggle("scrolled"
 (async () => {
   await loadRecipes();
   route();
+  // Index des recettes de chefs : mis à jour en arrière-plan une fois par semaine
+  setTimeout(() => { if (navigator.onLine !== false && ZBC.chefIndexStale()) runChefIndex(false); }, 4000);
 })();
 
 if ("serviceWorker" in navigator && location.protocol !== "file:") {

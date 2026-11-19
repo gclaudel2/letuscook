@@ -7,6 +7,7 @@
  *   POST /page  { url }               → { ok, html, finalUrl }      (récupère la page de recette)
  *   POST /ia    { url, title, text }  → { ok, recipe }              (secours IA, si pas de JSON-LD)
  *   POST /voix  { text }              → { ok, audio, mimeType }     (lecture à voix haute, via Gemini)
+ *   POST /liens { url, motif }        → { ok, links: [{u,t,i}] }    (liens de recettes d'une page de liste)
  *
  * Variables (Settings → Variables and Secrets) :
  *   ALLOWED_ORIGINS    ex. "https://votre-compte.github.io"  (plusieurs : séparées par des virgules)
@@ -406,6 +407,59 @@ async function handleVoice(body, env) {
   );
 }
 
+
+// ── /liens : liens de recettes d'une page de liste (index des recettes de chefs) ──
+// Le relais lit la page et ne renvoie que les liens : quelques Ko au lieu de la page entière.
+const MAX_LINKS = 250;
+
+function stripTags(html) {
+  return String(html || "")
+    .replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;|&#160;/g, " ").replace(/&amp;/g, "&").replace(/&#0?39;|&apos;|&#8217;|&rsquo;/g, "'")
+    .replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&#(\d+);/g, (_m, n) => String.fromCharCode(Number(n)))
+    .replace(/\s+/g, " ").trim();
+}
+function imageIn(html) {
+  const tag = /<(?:img|source)\b[^>]*>/i.exec(html || "");
+  if (!tag) return "";
+  const attr = (name) => (new RegExp(`\\b${name}\\s*=\\s*["']([^"']+)["']`, "i").exec(tag[0]) || [])[1] || "";
+  const srcset = attr("data-srcset") || attr("srcset");
+  const fromSet = srcset ? srcset.split(",").map((x) => x.trim().split(/\s+/)[0]).filter(Boolean).pop() : "";
+  return [attr("data-src"), attr("data-lazy-src"), fromSet, attr("src")].find((u) => u && !/^data:/i.test(u) && !/\.svg(?:[?#]|$)/i.test(u)) || "";
+}
+
+async function handleLinks(body) {
+  const page = await handlePage(body); // mêmes protections que /page
+  const motif = String(body?.motif || "");
+  if (!motif || motif.length > 200) throw new RelayError("INVALID_PATTERN", "Motif de lien invalide.", 400);
+  let re;
+  try { re = new RegExp(motif, "i"); } catch { throw new RelayError("INVALID_PATTERN", "Motif de lien invalide.", 400); }
+  const base = new URL(page.finalUrl);
+  const found = new Map();
+  const anchors = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
+  let m;
+  const html = page.html.replace(/<script[\s\S]*?<\/script>|<!--[\s\S]*?-->/gi, " ");
+  while ((m = anchors.exec(html)) && found.size < MAX_LINKS) {
+    const href = (/\bhref\s*=\s*["']([^"']+)["']/i.exec(m[1]) || [])[1];
+    if (!href) continue;
+    let u;
+    try { u = new URL(href, base); } catch { continue; }
+    if (u.hostname !== base.hostname || !re.test(u.pathname)) continue;
+    u.search = ""; u.hash = "";
+    const key = u.toString();
+    const title = (stripTags(m[2]) || (/\btitle\s*=\s*["']([^"']+)["']/i.exec(m[1]) || [])[1] || "").slice(0, 160);
+    let img = imageIn(m[2]);
+    if (img) { try { img = new URL(img, base).toString(); } catch { img = ""; } }
+    const prev = found.get(key) || { u: key, t: "", i: "" };
+    if (!prev.t && title.length >= 3) prev.t = title;
+    if (!prev.i && img) prev.i = img;
+    found.set(key, prev);
+  }
+  return { ok: true, finalUrl: page.finalUrl, links: [...found.values()] };
+}
+
 // ── Point d'entrée ───────────────────────────────────────────────
 export default {
   async fetch(request, env) {
@@ -414,7 +468,7 @@ export default {
 
     const { pathname } = new URL(request.url);
     try {
-      if (request.method !== "POST") throw new RelayError("NOT_FOUND", "Relais Zéro Blabla Cuisine : utilisez POST /page, /ia ou /voix.", 404);
+      if (request.method !== "POST") throw new RelayError("NOT_FOUND", "Relais Zéro Blabla Cuisine : utilisez POST /page, /ia, /voix ou /liens.", 404);
       const origin = request.headers.get("origin") || "";
       if (!isAllowedOrigin(origin, env)) {
         throw new RelayError(
@@ -428,6 +482,7 @@ export default {
       if (pathname === "/page") return json(await handlePage(body), 200, cors);
       if (pathname === "/ia") return json(await handleAi(body, env), 200, cors);
       if (pathname === "/voix") return json(await handleVoice(body, env), 200, cors);
+      if (pathname === "/liens") return json(await handleLinks(body), 200, cors);
       throw new RelayError("NOT_FOUND", "Route inconnue.", 404);
     } catch (err) {
       if (err instanceof RelayError) return json({ ok: false, error: { code: err.code, message: err.message } }, err.status, cors);

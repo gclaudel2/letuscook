@@ -916,13 +916,13 @@
     { id: "ietflp", name: "Il était une fois la pâtisserie", host: "www.iletaitunefoislapatisserie.com", urls: ["https://www.iletaitunefoislapatisserie.com/?s={q}"] },
     { id: "ptitchef", name: "Ptitchef", host: "www.ptitchef.com", urls: ["https://www.ptitchef.com/recettes/recherche?q={q}", "https://www.ptitchef.com/recherche?q={q}"] },
     // Recettes de chefs (étoilés et grands noms)
-    { id: "michelin", name: "Guide Michelin", host: "guide.michelin.com", chef: true, urls: ["https://guide.michelin.com/fr/fr/articles?q={q}", "https://guide.michelin.com/fr/fr/search?q={q}"] },
     { id: "madamefigaro", name: "Madame Figaro", host: "madame.lefigaro.fr", chef: true, urls: ["https://madame.lefigaro.fr/recherche?q={q}", "https://madame.lefigaro.fr/recherche/{q}"] },
     { id: "cvf", name: "Cuisine et Vins de France", host: "www.cuisineetvinsdefrance.com", chef: true, urls: ["https://www.cuisineetvinsdefrance.com/recherche?q={q}", "https://www.cuisineetvinsdefrance.com/?s={q}"] },
     { id: "atelierdeschefs", name: "L'Atelier des Chefs", host: "www.atelierdeschefs.fr", chef: true, urls: ["https://www.atelierdeschefs.fr/fr/recherche?q={q}", "https://www.atelierdeschefs.fr/recherche?q={q}"] },
   ];
   // Les sites ajoutés dans une nouvelle version rejoignent aussi les listes déjà personnalisées
-  const SITES_VERSION = 2;
+  const SITES_VERSION = 3;
+  const RETIRED_SITES = ["michelin"]; // remplacé par l'index des recettes de chefs
   const SITES_VERSION_KEY = "zbc.sites.version";
   const SITES_REMOVED_KEY = "zbc.sites.removed";
   const SITES_KEY = "zbc.sites";
@@ -942,7 +942,7 @@
     try {
       const stored = JSON.parse(localStorage.getItem(SITES_KEY) || "null");
       if (Array.isArray(stored)) {
-        let list = stored.filter((x) => x && x.host);
+        let list = stored.filter((x) => x && x.host && !RETIRED_SITES.includes(x.id));
         if (Number(localStorage.getItem(SITES_VERSION_KEY) || 1) < SITES_VERSION) {
           const removed = JSON.parse(localStorage.getItem(SITES_REMOVED_KEY) || "[]");
           const ids = new Set(list.map((x) => x.id));
@@ -983,7 +983,7 @@
   }
   const activeSites = () => getSearchSites().filter((x) => x.enabled !== false).map(compileSite);
   const PER_SITE = 3;
-  const MAX_RESULTS = 15;
+  const MAX_RESULTS = 20;
 
   const STOP = new Set(["recette", "recettes", "avec", "sans", "pour", "les", "des", "aux", "une", "facile", "rapide", "maison"]);
   function queryWords(q) {
@@ -1107,6 +1107,158 @@
     return { links: [], error: lastError ? lastError.message : null };
   }
 
+
+  // ── Index des recettes de chefs ────────────────────────────────
+  /*
+   * Certains sites de chefs n'ont pas de moteur de recherche interrogeable : on parcourt leurs
+   * listes de recettes une fois par semaine (le relais ne renvoie que les liens, quelques Ko),
+   * et l'index est gardé sur l'appareil. Chaque recherche y puise instantanément.
+   */
+  const CHEF_CATALOGS = [
+    { id: "gm-fr", name: "Gault&Millau", host: "fr.gaultmillau.com", maxPages: 40,
+      page: (n) => (n === 1 ? "https://fr.gaultmillau.com/fr/collections/recettes" : `https://fr.gaultmillau.com/fr/collections/recettes?page=${n}`),
+      motif: "^/fr/news/[\\w-]+$" },
+    { id: "michelin", name: "Guide Michelin", host: "guide.michelin.com", maxPages: 40,
+      page: (n) => (n === 1 ? "https://guide.michelin.com/fr/fr/articles/dining-in" : `https://guide.michelin.com/fr/fr/articles/dining-in/page/${n}`),
+      motif: "^/fr/fr/article/dining-in/[\\w.-]+$" },
+    { id: "gm-ch", name: "Gault&Millau Suisse", host: "www.gaultmillau.ch", maxPages: 80,
+      page: (n) => (n === 1 ? "https://www.gaultmillau.ch/fr/recettes" : `https://www.gaultmillau.ch/fr/recettes?page=${n - 1}`),
+      motif: "^/fr/recettes/[\\w-]+-\\d+$" },
+    { id: "lhr", name: "L'Hôtellerie Restauration", host: "www.lhotellerie-restauration.fr", maxPages: 80,
+      page: (n) => (n === 1 ? "https://www.lhotellerie-restauration.fr/actualite/theme/recette" : `https://www.lhotellerie-restauration.fr/actualite/theme/recette?page=${n}`),
+      motif: "^/actualite/[\\w-]+$" },
+  ];
+  const CHEF_INDEX_KEY = "zbc.chefIndex";
+  const CHEF_SOURCES_OFF_KEY = "zbc.chefSourcesOff";
+  const INDEX_MAX_AGE = 7 * 24 * 3600 * 1000;
+
+  function readChefIndex() {
+    try { return JSON.parse(localStorage.getItem(CHEF_INDEX_KEY) || "null") || { sites: {} }; } catch { return { sites: {} }; }
+  }
+  function writeChefIndex(idx) {
+    try { localStorage.setItem(CHEF_INDEX_KEY, JSON.stringify(idx)); } catch { /* stockage plein : on garde l'index en mémoire */ }
+  }
+  function chefSourcesOff() {
+    try { return JSON.parse(localStorage.getItem(CHEF_SOURCES_OFF_KEY) || "[]"); } catch { return []; }
+  }
+  function setChefSourceEnabled(id, on) {
+    const off = new Set(chefSourcesOff());
+    if (on) off.delete(id); else off.add(id);
+    try { localStorage.setItem(CHEF_SOURCES_OFF_KEY, JSON.stringify([...off])); } catch { /* */ }
+  }
+  /** État de l'index, pour les Réglages. */
+  function chefIndexStatus() {
+    const idx = readChefIndex();
+    const off = chefSourcesOff();
+    return CHEF_CATALOGS.map((c) => {
+      const e = idx.sites[c.id];
+      return { id: c.id, name: c.name, host: c.host, enabled: !off.includes(c.id), count: e ? e.items.length : 0, at: e ? e.at : 0, error: e ? e.error || "" : "" };
+    });
+  }
+
+  let indexing = null; // indexation en cours (une seule à la fois)
+
+  /** Liens de recettes d'une page de liste : via /liens (léger), sinon via /page (relais ancien). */
+  let linksRouteMissing = false; // relais pas encore mis à jour : inutile de retenter /liens
+  async function catalogPageLinks(cat, n) {
+    const url = cat.page(n);
+    try {
+      if (linksRouteMissing) throw new ExtractError("NOT_FOUND", "");
+      const res = await callWorker("/liens", { url, motif: cat.motif });
+      return res.links || [];
+    } catch (err) {
+      if (err.code !== "NOT_FOUND") throw err;
+      linksRouteMissing = true;
+      // Relais pas encore mis à jour : on lit la page entière
+      const page = await callWorker("/page", { url });
+      const doc = new DOMParser().parseFromString(page.html, "text/html");
+      const re = new RegExp(cat.motif, "i");
+      const out = new Map();
+      doc.querySelectorAll("a[href]").forEach((a) => {
+        let u; try { u = new URL(a.getAttribute("href"), url); } catch { return; }
+        if (u.hostname !== cat.host || !re.test(u.pathname)) return;
+        u.search = ""; u.hash = "";
+        const k = u.toString();
+        const prev = out.get(k) || { u: k, t: "", i: "" };
+        prev.t = prev.t || normSpace(a.textContent).slice(0, 160);
+        prev.i = prev.i || imageFromElement(a, url);
+        out.set(k, prev);
+      });
+      return [...out.values()];
+    }
+  }
+
+  async function indexCatalog(cat, onProgress) {
+    const items = new Map();
+    let emptyStreak = 0;
+    for (let n = 1; n <= cat.maxPages; n++) {
+      let links;
+      try { links = await catalogPageLinks(cat, n); } catch (err) {
+        if (n === 1) throw err;
+        break; // fin de la pagination (404) ou site indisponible : on garde ce qu'on a
+      }
+      let added = 0;
+      for (const l of links) {
+        if (!items.has(l.u)) { items.set(l.u, { u: l.u, t: l.t || titleFromSlug(new URL(l.u).pathname), i: l.i || "" }); added++; }
+        else if (l.i && !items.get(l.u).i) items.get(l.u).i = l.i;
+      }
+      onProgress(cat, n, items.size);
+      emptyStreak = added ? 0 : emptyStreak + 1;
+      if (emptyStreak >= 2) break; // plus rien de nouveau : dernière page atteinte
+    }
+    return [...items.values()];
+  }
+
+  /**
+   * Met à jour l'index (sources activées). force = ignorer l'âge de l'index.
+   * onProgress({ site, page, count, done, total }).
+   */
+  function refreshChefIndex({ force = false, onProgress = () => {} } = {}) {
+    if (indexing) return indexing;
+    indexing = (async () => {
+      const idx = readChefIndex();
+      const off = chefSourcesOff();
+      const todo = CHEF_CATALOGS.filter((c) => !off.includes(c.id) && (force || !idx.sites[c.id] || Date.now() - idx.sites[c.id].at > INDEX_MAX_AGE || idx.sites[c.id].error));
+      let done = 0;
+      // 2 sources à la fois : rapide sans surcharger le relais
+      const queue = todo.slice();
+      const worker = async () => {
+        while (queue.length) {
+          const cat = queue.shift();
+          try {
+            const items = await indexCatalog(cat, (c, page, count) => onProgress({ site: c.name, page, count, done, total: todo.length }));
+            idx.sites[cat.id] = { at: Date.now(), items };
+          } catch (err) {
+            if (["NO_RELAY", "OFFLINE", "RELAY_UNREACHABLE", "UNAUTHORIZED", "FORBIDDEN_ORIGIN"].includes(err.code)) throw err;
+            idx.sites[cat.id] = { at: Date.now(), items: (idx.sites[cat.id] && idx.sites[cat.id].items) || [], error: err.message };
+          }
+          done++;
+          writeChefIndex(idx);
+          onProgress({ site: cat.name, done, total: todo.length });
+        }
+      };
+      await Promise.all([worker(), worker()]);
+      return chefIndexStatus();
+    })();
+    indexing.finally(() => { indexing = null; });
+    return indexing;
+  }
+  const chefIndexStale = () => {
+    const idx = readChefIndex(); const off = chefSourcesOff();
+    return CHEF_CATALOGS.some((c) => !off.includes(c.id) && (!idx.sites[c.id] || Date.now() - idx.sites[c.id].at > INDEX_MAX_AGE));
+  };
+
+  /** Recettes de chefs de l'index qui correspondent à la recherche. */
+  function searchChefIndex(words, perSource = 4) {
+    const idx = readChefIndex();
+    const off = chefSourcesOff();
+    return CHEF_CATALOGS.filter((c) => !off.includes(c.id) && idx.sites[c.id]).map((c) =>
+      idx.sites[c.id].items
+        .filter((it) => matchesQuery(`${it.t} ${new URL(it.u).pathname}`, words))
+        .slice(0, perSource)
+        .map((it) => ({ url: it.u, title: it.t, image: it.i || undefined, site: c.name, chefSite: true })));
+  }
+
   /**
    * Cherche sur tous les sites en parallèle. onSite(nom, nombre, erreur) informe de l'avancement.
    * Résultats entrelacés (1er de chaque site, puis 2e…) pour varier les sources.
@@ -1122,10 +1274,14 @@
       onSite(site.name, links.length, error);
       return links;
     }));
+    // Recettes de chefs de l'index (instantané, sans réseau)
+    const fromIndex = searchChefIndex(words);
+    fromIndex.forEach((list) => { if (list.length) onSite(`${list[0].site} (index)`, list.length, null); });
+    const lists = perSite.concat(fromIndex);
     const results = [];
     const seen = new Set();
-    for (let i = 0; i < PER_SITE && results.length < MAX_RESULTS; i++) {
-      for (const list of perSite) {
+    for (let i = 0; i < 4 && results.length < MAX_RESULTS; i++) {
+      for (const list of lists) {
         const r = list[i];
         if (r && !seen.has(r.url) && results.length < MAX_RESULTS) { seen.add(r.url); results.push(r); }
       }
@@ -1155,7 +1311,7 @@
 
   window.ZBC = {
     CONFIG, ACCESS_CODE_KEY, WORKER_URL_KEY, getWorkerUrl, ExtractError,
-    extractRecipe, extractFromHtml, parseTargetUrl, searchRecipes, analyzeUrl, synthesize, getSearchSites, saveSearchSites, resetSearchSites, rememberRemovedSite, normalizeHost, testSearchSite, DEFAULT_SEARCH_SITES,
+    extractRecipe, extractFromHtml, parseTargetUrl, searchRecipes, analyzeUrl, synthesize, refreshChefIndex, chefIndexStatus, chefIndexStale, setChefSourceEnabled, CHEF_CATALOGS, getSearchSites, saveSearchSites, resetSearchSites, rememberRemovedSite, normalizeHost, testSearchSite, DEFAULT_SEARCH_SITES,
     parseIngredient, formatIngredient, formatQuantity, parseDuration, parseServings,
   };
 })();
