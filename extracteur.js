@@ -821,10 +821,105 @@
     throw new ExtractError("NO_RECIPE", "Aucune recette trouvée sur cette page.");
   }
 
-  /** Recherche de recettes (relais → Tavily) : [{ url, title, snippet }] */
-  async function searchRecipes(q) {
-    const res = await callWorker("/recherche", { q });
-    return res.results || [];
+  // ── Recherche directe sur les sites de recettes (sans service tiers) ──
+  /*
+   * L'appli ouvre la page de résultats de recherche de chaque site (via la route /page du relais)
+   * et en extrait les liens de recettes. Pour ajouter un site : son adresse de recherche
+   * et la forme de ses adresses de recettes.
+   */
+  const enc = encodeURIComponent;
+  const SEARCH_SITES = [
+    { name: "Marmiton", host: "www.marmiton.org", url: (q) => `https://www.marmiton.org/recettes/recherche.aspx?aqt=${enc(q)}`, recipe: /^\/recettes\/recette_[\w-]+\.aspx$/i },
+    { name: "750g", host: "www.750g.com", url: (q) => `https://www.750g.com/recherche/?q=${enc(q)}`, recipe: /^\/[\w-]+-r\d+\.htm$/i },
+    { name: "Cuisine AZ", host: "www.cuisineaz.com", url: (q) => `https://www.cuisineaz.com/recettes/recherche_terme.aspx?recherche=${enc(q)}`, recipe: /^\/recettes\/[\w-]+-\d+\.aspx$/i },
+    { name: "Journal des Femmes", host: "cuisine.journaldesfemmes.fr", url: (q) => `https://cuisine.journaldesfemmes.fr/s/?f_libelle=${enc(q)}`, recipe: /^\/recette\/\d+-[\w-]+$/i },
+    { name: "Ricardo", host: "www.ricardocuisine.com", url: (q) => `https://www.ricardocuisine.com/recherche?searchValue=${enc(q)}`, recipe: /^\/recettes\/\d+-[\w-]+$/i },
+    { name: "Papilles et Pupilles", host: "www.papillesetpupilles.fr", url: (q) => `https://www.papillesetpupilles.fr/?s=${enc(q)}`, recipe: /^\/\d{4}\/\d{2}\/[\w-]+\.html\/?$/i },
+  ];
+  const PER_SITE = 3;
+  const MAX_RESULTS = 12;
+
+  const fold = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/œ/g, "oe").replace(/æ/g, "ae");
+  const STOP = new Set(["recette", "recettes", "avec", "sans", "pour", "les", "des", "aux", "une", "facile", "rapide", "maison"]);
+  function queryWords(q) {
+    return fold(q).split(/[^a-z0-9]+/).filter((w) => w.length >= 3 && !STOP.has(w)).map((w) => w.replace(/(?:s|x)$/, ""));
+  }
+  /** Le lien parle-t-il bien de la recette cherchée ? (écarte les "recettes populaires" des marges) */
+  function matchesQuery(text, words) {
+    if (!words.length) return true;
+    const t = fold(text);
+    const hits = words.filter((w) => t.includes(w)).length;
+    // 1 ou 2 mots : tous ; au-delà : au moins 60 % ("gâteau chocolat noisette" ≈ "gâteau au chocolat")
+    return words.length <= 2 ? hits === words.length : hits >= Math.ceil(words.length * 0.6);
+  }
+  const titleFromSlug = (path) => {
+    const slug = decodeURIComponent(path.split("/").filter(Boolean).pop() || "")
+      .replace(/\.(aspx|html?|php)$/i, "").replace(/^recette_/, "").replace(/^\d+-|[-_]r?\d+$/g, "").replace(/[-_]+/g, " ").trim();
+    return slug ? slug.charAt(0).toUpperCase() + slug.slice(1) : "";
+  };
+
+  function linksFromSearchPage(site, html, words) {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const found = new Map(); // url → titre
+    const add = (href, title) => {
+      let u;
+      try { u = new URL(href, `https://${site.host}/`); } catch { return; }
+      if (u.hostname.replace(/^www\./, "") !== site.host.replace(/^www\./, "")) return;
+      if (!site.recipe.test(u.pathname)) return;
+      u.search = ""; u.hash = "";
+      const key = u.toString();
+      const clean = normSpace(title);
+      if (!found.has(key) || (!found.get(key) && clean)) found.set(key, clean.length >= 3 && clean.length <= 140 ? clean : "");
+    };
+    // 1. Liens visibles
+    doc.querySelectorAll("a[href]").forEach((a) => {
+      const title = a.getAttribute("title") || a.querySelector("h1,h2,h3,h4,[class*=title i]")?.textContent || a.textContent || a.querySelector("img[alt]")?.getAttribute("alt");
+      add(a.getAttribute("href"), title || "");
+    });
+    // 2. Liens présents dans les données de la page (sites construits en JavaScript)
+    const raw = html.replace(/\\\//g, "/");
+    const re = new RegExp(`(?:https?://${site.host.replace(/\./g, "\\.")})?(/[\\w%./-]{6,200})`, "gi");
+    for (const m of raw.matchAll(re)) if (site.recipe.test(m[1])) add(m[1], "");
+
+    const out = [];
+    for (const [url, title] of found) {
+      const t = title || titleFromSlug(new URL(url).pathname);
+      if (!matchesQuery(`${t} ${new URL(url).pathname}`, words)) continue;
+      out.push({ url, title: t, site: site.name });
+      if (out.length >= PER_SITE) break;
+    }
+    return out;
+  }
+
+  /**
+   * Cherche sur tous les sites en parallèle. onSite(nom, nombre, erreur) informe de l'avancement.
+   * Résultats entrelacés (1er de chaque site, puis 2e…) pour varier les sources.
+   */
+  async function searchRecipes(q, onSite = () => {}) {
+    const query = normSpace(q);
+    if (query.length < 2) throw new ExtractError("INVALID_QUERY", "Tapez au moins 2 lettres.");
+    const words = queryWords(query);
+    const perSite = await Promise.all(SEARCH_SITES.map(async (site) => {
+      try {
+        const page = await callWorker("/page", { url: site.url(query) });
+        const links = linksFromSearchPage(site, page.html, words);
+        onSite(site.name, links.length, null);
+        return links;
+      } catch (err) {
+        if (err.code === "NO_RELAY" || err.code === "UNAUTHORIZED" || err.code === "FORBIDDEN_ORIGIN" || err.code === "OFFLINE" || err.code === "RELAY_UNREACHABLE") throw err;
+        onSite(site.name, 0, err.message);
+        return [];
+      }
+    }));
+    const results = [];
+    const seen = new Set();
+    for (let i = 0; i < PER_SITE && results.length < MAX_RESULTS; i++) {
+      for (const list of perSite) {
+        const r = list[i];
+        if (r && !seen.has(r.url) && results.length < MAX_RESULTS) { seen.add(r.url); results.push(r); }
+      }
+    }
+    return results;
   }
 
   /** Récupère et analyse une page SANS IA (pour les fiches de résultats). */
@@ -837,7 +932,7 @@
 
   window.ZBC = {
     CONFIG, ACCESS_CODE_KEY, WORKER_URL_KEY, getWorkerUrl, ExtractError,
-    extractRecipe, extractFromHtml, parseTargetUrl, searchRecipes, analyzeUrl,
+    extractRecipe, extractFromHtml, parseTargetUrl, searchRecipes, analyzeUrl, SEARCH_SITES,
     parseIngredient, formatIngredient, formatQuantity, parseDuration, parseServings,
   };
 })();

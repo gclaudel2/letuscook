@@ -246,6 +246,8 @@
   .hero.compact .brand .accent { margin-left: 0.25em; }
   .hero.compact .tagline { display: none; }
   .search-btn { width: 56px; padding: 0; flex: none; background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .sources { margin: -6px 2px 12px; font-size: 12px; color: var(--muted); }
+  .search-status .sources { margin: 4px 0 0; }
   .search-status { margin: 16px 2px 10px; font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
   .search-controls { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
   .segs { display: flex; gap: 4px; padding: 4px; border-radius: 12px; background: var(--line); }
@@ -345,7 +347,7 @@
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "1.5.0";
+const APP_VERSION = "1.6.0";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -460,7 +462,7 @@ const state = {
   loading: false,
   log: [],            // journal de la dernière extraction : { message, status, ms }
   search: {           // moteur de recherche
-    q: "", id: 0, loading: false, error: "", results: [],
+    q: "", id: 0, loading: false, error: "", results: [], sources: [],
     sort: "pertinence", quick: false, easy: false, scrollY: 0,
   },
 };
@@ -718,15 +720,29 @@ function renderSearchPanel() {
   const parts = [form];
   if (S.error) parts.push(h("div", { class: "notice error", role: "alert" }, S.error));
 
+  if (S.loading && !S.results.length) {
+    const done = S.sources.length;
+    parts.push(h("div", { class: "search-status", id: "search-status", "aria-live": "polite" },
+      `Recherche sur ${ZBC.SEARCH_SITES.length} sites de recettes… ${done}/${ZBC.SEARCH_SITES.length}`,
+      done ? h("div", { class: "sources" }, sourcesText()) : null));
+  }
   if (S.results.length) {
     parts.push(h("div", { class: "search-status", id: "search-status", "aria-live": "polite" }, searchStatusText()));
+    if (S.sources.length) parts.push(h("div", { class: "sources" }, sourcesText()));
     parts.push(renderSearchControls());
     parts.push(h("ul", { class: "results", id: "results" }, visibleResults().map(resultCard)));
   } else if (!S.loading && !S.error) {
-    parts.push(h("p", { class: "hint" }, "Cherchez une recette parmi les grands sites de cuisine. Comparez temps, difficulté et notes d'un coup d'œil, puis ouvrez-la en mode cuisine."));
+    parts.push(h("p", { class: "hint" }, `Cherchez une recette sur ${ZBC.SEARCH_SITES.map((x) => x.name).join(", ")}. Comparez temps, difficulté et notes d'un coup d'œil, puis ouvrez-la en mode cuisine.`));
   }
   parts.push(h("p", { class: "version" }, `Zéro Blabla Cuisine · version ${APP_VERSION}`));
   return h("section", { "aria-label": "Chercher une recette" }, parts);
+}
+
+function sourcesText() {
+  const S = state.search;
+  const ok = S.sources.filter((x) => !x.error && x.count > 0).map((x) => `${x.name} (${x.count})`);
+  const ko = S.sources.filter((x) => x.error).map((x) => x.name);
+  return [ok.length && `Trouvé sur ${ok.join(", ")}`, ko.length && `inaccessible${ko.length > 1 ? "s" : ""} : ${ko.join(", ")}`].filter(Boolean).join(" · ");
 }
 
 function searchStatusText() {
@@ -798,7 +814,7 @@ function resultCard(res) {
   }
 
   const title = (r && r.title) || res.title.split(/\s+[-|–—·»]\s+/)[0];
-  const site = (r && r.siteName) || hostOf(res.url);
+  const site = res.site || (r && r.siteName) || hostOf(res.url);
   const meta = [h("span", {}, site)];
   if (r && r.rating) {
     meta.push(h("span", { class: "rating" }, icon("star", true), `${String(r.rating.value).replace(".", ",")}${r.rating.count ? ` (${r.rating.count.toLocaleString("fr-FR")})` : ""}`));
@@ -840,13 +856,17 @@ async function runSearch(raw) {
   const q = String(raw || "").trim();
   if (q.length < 2) { S.error = "Tapez au moins 2 lettres."; return renderHome(); }
   const id = ++S.id;
-  Object.assign(S, { q, loading: true, error: "", results: [], scrollY: 0 });
+  Object.assign(S, { q, loading: true, error: "", results: [], sources: [], scrollY: 0 });
   renderHome();
   document.activeElement?.blur(); // ferme le clavier
 
   let found;
   try {
-    found = await ZBC.searchRecipes(q);
+    found = await ZBC.searchRecipes(q, (name, count, error) => {
+      if (id !== S.id) return;
+      S.sources.push({ name, count, error });
+      if (!S.results.length) renderHome();
+    });
   } catch (err) {
     if (id !== S.id) return;
     S.loading = false;
@@ -858,7 +878,9 @@ async function runSearch(raw) {
   if (id !== S.id) return;
   if (!found.length) {
     S.loading = false;
-    S.error = "Aucune recette trouvée. Essayez d'autres mots (ex. « gâteau chocolat » plutôt qu'une phrase).";
+    S.error = S.sources.every((x) => x.error)
+      ? "Aucun site de recettes n'a répondu. Vérifiez la connexion, puis réessayez."
+      : "Aucune recette trouvée. Essayez d'autres mots (ex. « gâteau chocolat » plutôt qu'une phrase).";
     return renderHome();
   }
   S.results = found.map((f, index) => ({ ...f, index, status: "pending", recipe: null, error: "" }));
