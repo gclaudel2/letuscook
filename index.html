@@ -33,6 +33,18 @@
     --serif: ui-serif, "New York", "Iowan Old Style", Georgia, serif;
     --sans: -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, sans-serif;
     --rounded: ui-rounded, "SF Pro Rounded", -apple-system, system-ui, sans-serif;
+    --head: var(--serif);
+    --head-w: 800;
+    --pill: 999px;
+    --r-sm: 14px;
+    --thumb-r: 12px;
+    --tabs-bg: var(--line);
+    --tab-on-bg: var(--surface);
+    --tab-on-ink: var(--ink);
+    --chip-on: var(--accent);
+    --chip-on-ink: var(--accent-ink);
+    --chef-bg: #1B1714;
+    --chef-ink: #F4D58D;
     --safe-top: env(safe-area-inset-top, 0px);
     --safe-bottom: env(safe-area-inset-bottom, 0px);
   }
@@ -69,6 +81,114 @@
   :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
   .wrap { max-width: 680px; margin: 0 auto; padding: 0 20px; }
   .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+
+  /* ════════════ Thèmes (Réglages › Apparence) ════════════ */
+  /* Ardoise de bistrot (par défaut) : toujours sombre */
+  html[data-theme="bistrot"] {
+    color-scheme: dark;
+    --bg: #1F2A26; --surface: #26332E; --ink: #F3EEDF; --muted: #B9B5A6; --line: #3A4842;
+    --accent: #E9B949; --accent-ink: #1F2A26; --accent-soft: #34433C; --flame-2: #E9B949;
+    --done: #7F8A84; --danger: #FF8A7A;
+    --radius: 10px; --r-sm: 8px; --pill: 8px; --thumb-r: 8px;
+    --serif: "DM Serif Display", Georgia, serif; --head: "DM Serif Display", Georgia, serif; --head-w: 400;
+    --sans: "Work Sans", -apple-system, system-ui, sans-serif;
+    --tabs-bg: transparent; --tab-on-bg: var(--ink); --tab-on-ink: #1F2A26;
+    --chef-bg: #E9B949; --chef-ink: #1F2A26;
+  }
+  html[data-theme="bistrot"] .tabs { border: 1.5px solid #4A5A53; }
+  html[data-theme="bistrot"] .filter:not([aria-pressed="true"]) { border-style: dashed; border-color: #6B7A72; background: transparent; }
+  html[data-theme="bistrot"] .tagline { font: 600 24px/1.2 Caveat, cursive; color: var(--muted); }
+  html[data-theme="bistrot"] .r-name { font: 400 19px/1.15 var(--head); }
+  html[data-theme="bistrot"] .sub { color: var(--accent); }
+
+  /* Carnet de famille */
+  html[data-theme="carnet"] {
+    --bg: #FFFDF7; --rule: #DCE6F2; --surface: #FFFFFF; --ink: #1E2A44; --muted: #56607A; --line: #E3DCCB;
+    --accent: #C8372D; --accent-ink: #FFFFFF; --accent-soft: #FBE3DF; --flame-2: #22356B;
+    --radius: 6px; --r-sm: 10px; --thumb-r: 3px;
+    --serif: Fraunces, Georgia, serif; --head: Fraunces, Georgia, serif; --head-w: 700;
+    --sans: "Nunito Sans", -apple-system, system-ui, sans-serif;
+    --tabs-bg: #F1ECE0; --chip-on: #22356B; --chip-on-ink: #FFFFFF;
+    --chef-bg: #FBE3DF; --chef-ink: #A12C24;
+  }
+  @media (prefers-color-scheme: dark) {
+    html[data-theme="carnet"] {
+      --bg: #18202F; --rule: #222C3E; --surface: #1F2839; --ink: #EEF1F7; --muted: #A3ACC0; --line: #2E3A50;
+      --accent: #FF7A6E; --accent-ink: #1A0E0C; --accent-soft: #3A2426; --flame-2: #9DB4F0;
+      --tabs-bg: #232D40; --chip-on: #9DB4F0; --chip-on-ink: #18202F; --chef-bg: #3A2426; --chef-ink: #FFB3AB;
+    }
+  }
+  html[data-theme="carnet"] body { background: repeating-linear-gradient(var(--bg) 0 31px, var(--rule) 31px 32px) var(--bg); }
+  html[data-theme="carnet"] .result, html[data-theme="carnet"] .card { box-shadow: 2px 3px 0 var(--line); }
+  html[data-theme="carnet"] .tagline { font: italic 400 17px/1.4 var(--serif); }
+
+  /* Table étoilée */
+  html[data-theme="etoile"] {
+    --bg: #FBFAF7; --surface: #FFFFFF; --ink: #111111; --muted: #5E5A52; --line: #E4DFD5;
+    --accent: #111111; --accent-ink: #FBFAF7; --accent-soft: #EFEAE0; --flame-2: #A8873A; --gold: #A8873A; --gold-ink: #7A5E22;
+    --radius: 0px; --r-sm: 0px; --pill: 0px; --thumb-r: 0px;
+    --serif: "Cormorant Garamond", Georgia, serif; --head: "Cormorant Garamond", Georgia, serif; --head-w: 600;
+    --sans: Manrope, -apple-system, system-ui, sans-serif;
+    --tabs-bg: transparent; --tab-on-bg: transparent;
+    --chef-bg: #111111; --chef-ink: #E9D9A6;
+  }
+  @media (prefers-color-scheme: dark) {
+    html[data-theme="etoile"] {
+      --bg: #0E0E0D; --surface: #171614; --ink: #F2EFE8; --muted: #A8A296; --line: #2C2A26;
+      --accent: #E9D9A6; --accent-ink: #111111; --accent-soft: #24211B; --gold: #C9A85A; --gold-ink: #D8BC77;
+      --chef-bg: #E9D9A6; --chef-ink: #111111;
+    }
+  }
+  html[data-theme="etoile"] .tab { font: 600 13px/1 var(--sans); letter-spacing: 0.14em; text-transform: uppercase; }
+  html[data-theme="etoile"] .tab[aria-selected="true"] { box-shadow: inset 0 -2px 0 var(--ink); }
+  html[data-theme="etoile"] .filter { font: 600 12px/1 var(--sans); letter-spacing: 0.08em; text-transform: uppercase; }
+  html[data-theme="etoile"] .result { border-width: 0 0 1px; padding: 0 0 14px; background: transparent; }
+  html[data-theme="etoile"] .r-name { font: 600 21px/1.1 var(--head); }
+  html[data-theme="etoile"] .tagline { font: italic 500 21px/1.3 var(--serif); }
+  html[data-theme="etoile"] .sub, html[data-theme="etoile"] .r-chef { color: var(--gold-ink); }
+  html[data-theme="etoile"] a:not(.brand-link) { color: var(--gold-ink); }
+
+  /* Marché frais */
+  html[data-theme="marche"] {
+    --bg: #F4F8EF; --surface: #FFFFFF; --ink: #16251A; --muted: #4D5E51; --line: #D9E5CF;
+    --accent: #D63A2A; --accent-ink: #FFFFFF; --accent-soft: #FDE2DD; --flame-2: #3E8E4F; --green: #1F5A32; --lemon: #F5C542;
+    --radius: 20px; --r-sm: 16px; --pill: 12px; --thumb-r: 16px;
+    --serif: "Bricolage Grotesque", -apple-system, sans-serif; --head: "Bricolage Grotesque", -apple-system, sans-serif; --head-w: 800;
+    --sans: "DM Sans", -apple-system, system-ui, sans-serif;
+    --tabs-bg: #E3EDDA; --tab-on-bg: var(--green); --tab-on-ink: #FFFFFF; --chip-on: var(--green); --chip-on-ink: #FFFFFF;
+    --chef-bg: var(--lemon); --chef-ink: #16251A;
+  }
+  @media (prefers-color-scheme: dark) {
+    html[data-theme="marche"] {
+      --bg: #0F1A12; --surface: #16241A; --ink: #EAF3E4; --muted: #A3B5A6; --line: #26382B;
+      --accent: #FF6B5A; --accent-ink: #1A0705; --accent-soft: #3A1F1B; --green: #7BC88C;
+      --tabs-bg: #1B2B1F; --tab-on-ink: #0F1A12; --chip-on-ink: #0F1A12;
+    }
+  }
+  html[data-theme="marche"] .result, html[data-theme="marche"] .card { border-color: transparent; box-shadow: 0 2px 0 var(--line); }
+  html[data-theme="marche"] .r-name { font: 800 18px/1.15 var(--head); }
+
+  /* Logos de chaque thème */
+  .brand .bb, .brand .bc, .brand .be, .brand .bm { display: inline-flex; }
+  .bb { flex-direction: column; letter-spacing: 0; }
+  .bb-let { font: 700 0.56em/0.9 Caveat, cursive; color: var(--accent); transform: rotate(-4deg); transform-origin: left; }
+  .bb-cook { font: 400 1.04em/0.95 "DM Serif Display", Georgia, serif; letter-spacing: 0.01em; color: var(--ink); }
+  .bb-rule { margin-top: 6px; width: 2.7em; height: 3px; border-top: 2px solid var(--accent); border-bottom: 1px solid var(--accent); }
+  .bc { position: relative; font: 700 0.92em/1 Kalam, cursive; letter-spacing: -0.01em; color: var(--flame-2); }
+  .bc svg { position: absolute; left: 0.04em; bottom: -0.16em; width: 100%; height: 0.3em; }
+  .be { flex-direction: column; gap: 6px; }
+  .be-word { font: 600 0.68em/1 "Cormorant Garamond", Georgia, serif; letter-spacing: 0.2em; color: var(--ink); }
+  .be-rule { display: flex; align-items: center; gap: 10px; color: var(--gold); }
+  .be-rule i { width: 56px; border-top: 1px solid var(--gold); }
+  .be-rule svg { width: 12px; height: 12px; }
+  .bm { align-items: baseline; font: 800 0.9em/1 "Bricolage Grotesque", sans-serif; letter-spacing: -0.04em; color: var(--green); }
+  .bm-us { display: inline-block; padding: 0 0.12em; margin: 0 0.04em; border-radius: 99px; background: var(--lemon); color: #16251A; transform: rotate(-6deg); }
+  .bm-cook { color: var(--accent); }
+  .bm svg { width: 0.5em; height: 0.5em; align-self: flex-start; margin-left: 0.04em; fill: #3E8E4F; }
+  .hero.compact .bb { flex-direction: row; align-items: baseline; gap: 0.2em; }
+  .hero.compact .bb-rule, .hero.compact .be-rule { display: none; }
+  .hero.compact .bb-let { transform: none; }
 
   /* ── Barre du haut ─────────────────────────────── */
   .topbar {
@@ -120,25 +240,25 @@
   @media (prefers-reduced-motion: reduce) { .brand .b-flame { animation: none; } }
   .tagline { margin: 12px 0 0; color: var(--muted); font-size: 17px; }
 
-  .tabs { display: flex; gap: 6px; padding: 5px; border-radius: 999px; background: var(--line); margin-bottom: 22px; }
+  .tabs { display: flex; gap: 6px; padding: 5px; border-radius: var(--pill); background: var(--tabs-bg); margin-bottom: 22px; }
   .tab {
-    flex: 1; height: 44px; border: 0; border-radius: 999px; background: transparent;
+    flex: 1; height: 44px; border: 0; border-radius: var(--pill); background: transparent;
     font-weight: 650; font-size: 16px; color: var(--muted);
   }
-  .tab[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px rgb(0 0 0 / 0.12); }
+  .tab[aria-selected="true"] { background: var(--tab-on-bg); color: var(--tab-on-ink); box-shadow: 0 1px 3px rgb(0 0 0 / 0.12); }
   .tab .count { font-variant-numeric: tabular-nums; opacity: 0.7; }
 
   .field-label { display: block; font-weight: 650; margin-bottom: 8px; }
   .url-row { display: flex; gap: 8px; }
   .input {
     width: 100%; min-width: 0; height: 56px; padding: 0 16px;
-    border: 2px solid var(--line); border-radius: 14px; background: var(--surface);
+    border: 2px solid var(--line); border-radius: var(--r-sm); background: var(--surface);
     font-size: 17px;
   }
   .input:focus { border-color: var(--accent); outline: none; }
   .btn {
     display: inline-flex; align-items: center; justify-content: center; gap: 10px;
-    height: 56px; padding: 0 20px; border-radius: 14px;
+    height: 56px; padding: 0 20px; border-radius: var(--r-sm);
     border: 2px solid var(--line); background: var(--surface); font-weight: 650; font-size: 17px;
   }
   .btn:active { transform: scale(0.98); }
@@ -188,12 +308,12 @@
   .card h3 { margin: 0; font: 650 16px/1.25 var(--sans); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
   .card .meta { margin-top: 4px; font-size: 13px; color: var(--muted); }
   .empty { text-align: center; color: var(--muted); padding: 40px 10px; }
-  .empty strong { display: block; color: var(--ink); font: 700 22px/1.2 var(--serif); margin-bottom: 6px; }
+  .empty strong { display: block; color: var(--ink); font: var(--head-w) 22px/1.2 var(--head); margin-bottom: 6px; }
 
   /* ── Recette / mode cuisine ────────────────────── */
   .r-image { margin: 4px 0 18px; border-radius: var(--radius); overflow: hidden; aspect-ratio: 16 / 10; background: var(--accent-soft); }
   .r-image img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .r-title { margin: 6px 0 12px; font: 800 clamp(30px, 8.5vw, 42px)/1.05 var(--serif); letter-spacing: -0.02em; }
+  .r-title { margin: 6px 0 12px; font: var(--head-w) clamp(30px, 8.5vw, 42px)/1.05 var(--head); letter-spacing: -0.02em; }
   .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
   .chip { padding: 6px 12px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); font-size: 15px; }
   .chip b { font-variant-numeric: tabular-nums; }
@@ -216,7 +336,7 @@
   .servings-reset { display: block; margin: 0 auto 6px; border: 0; background: none; color: var(--accent); font-size: 15px; padding: 8px; }
 
   .section-title { display: flex; align-items: baseline; justify-content: space-between; margin: 30px 0 10px; }
-  .section-title h2 { margin: 0; font: 800 26px/1.1 var(--serif); letter-spacing: -0.01em; }
+  .section-title h2 { margin: 0; font: var(--head-w) 26px/1.1 var(--head); letter-spacing: -0.01em; }
   .section-title .progress { color: var(--muted); font-size: 15px; font-variant-numeric: tabular-nums; }
   .sub { margin: 22px 0 8px; font: 700 15px/1.3 var(--sans); text-transform: uppercase; letter-spacing: 0.06em; color: var(--accent); }
 
@@ -272,8 +392,8 @@
   .seg { flex: 1; height: 36px; border: 0; border-radius: 9px; background: transparent; font-size: 14px; font-weight: 650; color: var(--muted); }
   .seg[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgb(0 0 0 / 0.12); }
   .filters { display: flex; gap: 8px; flex-wrap: wrap; }
-  .filter { height: 36px; padding: 0 14px; border-radius: 999px; border: 1.5px solid var(--line); background: var(--surface); font-size: 14px; font-weight: 650; }
-  .filter[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .filter { height: 36px; padding: 0 14px; border-radius: var(--pill); border: 1.5px solid var(--line); background: var(--surface); font-size: 14px; font-weight: 650; }
+  .filter[aria-pressed="true"] { background: var(--chip-on); border-color: var(--chip-on); color: var(--chip-on-ink); }
   .results { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
   .result {
     display: flex; gap: 12px; width: 100%; padding: 10px; text-align: left;
@@ -281,7 +401,7 @@
   }
   .result:active { transform: scale(0.99); }
   .result.fail, .result.partial { opacity: 0.72; }
-  .r-thumb { flex: none; width: 92px; height: 92px; border-radius: 12px; overflow: hidden; background: var(--accent-soft); display: grid; place-items: center; }
+  .r-thumb { flex: none; width: 92px; height: 92px; border-radius: var(--thumb-r); overflow: hidden; background: var(--accent-soft); display: grid; place-items: center; }
   .r-thumb { position: relative; }
   .r-thumb img, .card .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; transition: opacity 0.25s; }
   .r-thumb img.loading, .card .thumb img.loading { position: absolute; inset: 0; opacity: 0; }
@@ -294,8 +414,8 @@
   .rating svg { width: 14px; height: 14px; color: #E2A100; }
   .badge { padding: 1px 8px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font-size: 12px; font-weight: 700; }
   .badge.soft { background: var(--line); color: var(--muted); }
-  .badge.chef { background: #1B1714; color: #F4D58D; }
-  @media (prefers-color-scheme: dark) { .badge.chef { background: #F4D58D; color: #1B1714; } }
+  .badge.chef { background: var(--chef-bg); color: var(--chef-ink); }
+  @media (prefers-color-scheme: dark) { :root { --chef-bg: #F4D58D; --chef-ink: #1B1714; } }
   .r-chef { margin: 4px 0 -4px; font: italic 600 16px/1.3 var(--serif); color: var(--accent); }
   .facts { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 2px; font-size: 14px; }
   .facts.muted { color: var(--muted); font-size: 13px; }
@@ -376,7 +496,7 @@
   .btn.small { height: 42px; padding: 0 14px; font-size: 15px; border-radius: 12px; }
   .btn.primary-sm { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
   dialog::backdrop { background: rgb(0 0 0 / 0.45); }
-  dialog h2 { margin: 0 0 4px; font: 800 26px/1.1 var(--serif); }
+  dialog h2 { margin: 0 0 4px; font: var(--head-w) 26px/1.1 var(--head); }
   dialog .group { margin-top: 20px; }
   dialog .group p { margin: 6px 0 0; color: var(--muted); font-size: 14px; }
   dialog .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
@@ -384,6 +504,28 @@
 
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation-duration: 0.01s !important; } }
 </style>
+<script>
+/* Thème choisi (Réglages › Apparence), appliqué avant l'affichage pour éviter un flash */
+window.ZBC_THEMES = {
+  bistrot: { label: "Ardoise de bistrot", fonts: "family=DM+Serif+Display:ital@0;1&family=Caveat:wght@600;700&family=Work+Sans:wght@400;500;600;700" },
+  braise: { label: "Braise", fonts: "" },
+  carnet: { label: "Carnet de famille", fonts: "family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,700;1,9..144,400&family=Kalam:wght@400;700&family=Nunito+Sans:wght@400;600;700;800" },
+  etoile: { label: "Table étoilée", fonts: "family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500&family=Manrope:wght@400;500;600;700" },
+  marche: { label: "Marché frais", fonts: "family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=DM+Sans:wght@400;500;600;700" },
+};
+window.applyTheme = function (name) {
+  var T = window.ZBC_THEMES; if (!T[name]) name = "bistrot";
+  document.documentElement.setAttribute("data-theme", name);
+  var old = document.getElementById("theme-fonts");
+  if (T[name].fonts) {
+    var href = "https://fonts.googleapis.com/css2?" + T[name].fonts + "&display=swap";
+    if (!old) { old = document.createElement("link"); old.id = "theme-fonts"; old.rel = "stylesheet"; document.head.appendChild(old); }
+    if (old.getAttribute("href") !== href) old.setAttribute("href", href);
+  } else if (old) old.remove();
+  return name;
+};
+(function () { var t; try { t = JSON.parse(localStorage.getItem("zbc.theme")); } catch (e) {} window.applyTheme(t || "bistrot"); })();
+</script>
 </head>
 <body>
 <header class="topbar" id="topbar"><div class="wrap" id="toolbar"></div></header>
@@ -393,6 +535,17 @@
 <dialog id="settings" aria-labelledby="settings-title">
   <form method="dialog" id="settings-form">
     <h2 id="settings-title">Réglages</h2>
+    <div class="group">
+      <label class="field-label" for="set-theme">Apparence</label>
+      <select class="input" id="set-theme">
+        <option value="bistrot">Ardoise de bistrot</option>
+        <option value="braise">Braise</option>
+        <option value="carnet">Carnet de famille</option>
+        <option value="etoile">Table étoilée</option>
+        <option value="marche">Marché frais</option>
+      </select>
+      <p>Le changement s'applique tout de suite.</p>
+    </div>
     <div class="group">
       <label class="field-label" for="set-gesture">Sensibilité du geste de la main</label>
       <select class="input" id="set-gesture">
@@ -446,7 +599,7 @@
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.6.0";
+const APP_VERSION = "2.7.0";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1110,6 +1263,46 @@ function setView(toolbarItems, content) {
 }
 
 /* ════════════ Accueil ════════════ */
+/* ════════════ Thèmes ════════════ */
+const THEME_TAGLINES = {
+  bistrot: "Le plat du jour, sans le baratin.",
+  braise: "La recette. Rien que la recette.",
+  carnet: "Les recettes qu’on se passe, sans les pages de pub.",
+  etoile: "La cuisine des grands chefs, à votre table.",
+  marche: "Frais, de saison, et droit au but.",
+};
+const currentTheme = () => document.documentElement.getAttribute("data-theme") || "bistrot";
+function svgEl(viewBox, inner, cls) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", viewBox); svg.setAttribute("aria-hidden", "true");
+  if (cls) svg.setAttribute("class", cls);
+  svg.innerHTML = inner;
+  return svg;
+}
+/** Le logo « letuscook » dans le style du thème choisi. */
+function brandParts() {
+  switch (currentTheme()) {
+    case "bistrot":
+      return [h("span", { class: "bb" }, h("span", { class: "bb-let" }, "Let us"), h("span", { class: "bb-cook" }, "COOK"), h("span", { class: "bb-rule" }))];
+    case "carnet":
+      return [h("span", { class: "bc" }, "letuscook",
+        svgEl("0 0 200 16", '<path d="M2 10c40-8 90-9 150-4 15 1 28 0 44-4" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linecap="round"/>'))];
+    case "etoile":
+      return [h("span", { class: "be" }, h("span", { class: "be-word" }, "LETUSCOOK"),
+        h("span", { class: "be-rule" }, h("i"), svgEl("0 0 24 24", '<path fill="currentColor" d="M12 0l2.8 9.2L24 12l-9.2 2.8L12 24l-2.8-9.2L0 12l9.2-2.8z"/>'), h("i")))];
+    case "marche":
+      return [h("span", { class: "bm" }, "let", h("span", { class: "bm-us" }, "us"), h("span", { class: "bm-cook" }, "cook"),
+        svgEl("0 0 24 24", '<path d="M20 4C10 4 4 9 4 17c0 1 .1 2 .3 3C7 13 12 9 18 8c-5 3-9 7-11 12 9 0 13-7 13-16z"/>'))];
+    default:
+      return ["let", h("span", { class: "b-us" }, "us"), h("span", { class: "b-cook" }, "cook"), flameIcon()];
+  }
+}
+/** Couleur de la barre d'état iOS = fond du thème. */
+function syncThemeColor() {
+  const bg = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();
+  document.querySelectorAll('meta[name="theme-color"]').forEach((m) => m.setAttribute("content", bg));
+}
+
 /** Petite flamme qui danse à côté du nom. */
 function flameIcon() {
   const NS = "http://www.w3.org/2000/svg";
@@ -1141,9 +1334,9 @@ function renderHome() {
       h("div", { class: "hero-row" },
         h("h1", { class: "brand" },
           h("a", { href: "#/", class: "brand-link", "aria-label": "letuscook : retour à l'accueil", onclick: (e) => { e.preventDefault(); resetHome(); } },
-            "let", h("span", { class: "b-us" }, "us"), h("span", { class: "b-cook" }, "cook"), flameIcon())),
+            ...brandParts())),
         settingsButton()),
-      h("p", { class: "tagline" }, "La recette. Rien que la recette."),
+      h("p", { class: "tagline" }, THEME_TAGLINES[currentTheme()] || THEME_TAGLINES.braise),
     ),
     tabs,
     state.tab === "carnet" ? renderCarnet() : state.tab === "extraire" ? renderExtractPanel() : renderSearchPanel(),
@@ -1987,12 +2180,18 @@ function openSettings() {
   sitesUI.editing = null; sitesUI.test = null;
   renderSitesManager();
   $("#set-gesture").value = store.get("zbc.gestureLevel", "normale");
+  $("#set-theme").value = currentTheme();
   renderChefIndex();
   const dlg = $("#settings");
   if (typeof dlg.showModal === "function") dlg.showModal();
 }
 
 $("#set-gesture").addEventListener("change", (e) => store.set("zbc.gestureLevel", e.target.value)); // pris en compte tout de suite
+$("#set-theme").addEventListener("change", (e) => {
+  store.set("zbc.theme", window.applyTheme(e.target.value));
+  syncThemeColor();
+  if (!/^#\/(r\/|apercu)/.test(location.hash)) renderHome(); // logo et slogan du nouveau thème, derrière les réglages
+});
 $("#settings").addEventListener("close", () => {
   if ($("#settings").returnValue !== "save") return;
   const worker = $("#set-worker").value.trim();
@@ -2041,6 +2240,7 @@ $("#import-file").addEventListener("change", async (e) => {
 window.addEventListener("hashchange", route);
 window.addEventListener("scroll", () => $("#topbar").classList.toggle("scrolled", window.scrollY > 4), { passive: true });
 
+syncThemeColor();
 (async () => {
   await loadRecipes();
   route();
