@@ -171,10 +171,11 @@
 
   /* Logos de chaque thème */
   .brand .bb, .brand .bc, .brand .be, .brand .bm { display: inline-flex; }
-  .bb { flex-direction: column; letter-spacing: 0; }
-  .bb-let { font: 700 0.56em/0.9 Caveat, cursive; color: var(--accent); transform: rotate(-4deg); transform-origin: left; }
-  .bb-cook { font: 400 1.04em/0.95 "DM Serif Display", Georgia, serif; letter-spacing: 0.01em; color: var(--ink); }
-  .bb-rule { margin-top: 6px; width: 2.7em; height: 3px; border-top: 2px solid var(--accent); border-bottom: 1px solid var(--accent); }
+  /* « Let us » à la craie posé contre « COOK », sur une seule ligne (le bouton Réglages reste à côté) */
+  .bb { position: relative; align-items: flex-end; gap: 0.12em; letter-spacing: 0; padding-bottom: 8px; }
+  .bb-let { font: 700 0.5em/1 Caveat, cursive; color: var(--accent); transform: rotate(-8deg) translateY(-0.55em); }
+  .bb-cook { font: 400 1em/0.9 "DM Serif Display", Georgia, serif; letter-spacing: 0.01em; color: var(--ink); }
+  .bb-rule { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; border-top: 2px solid var(--accent); border-bottom: 1px solid var(--accent); }
   .bc { position: relative; font: 700 0.92em/1 Kalam, cursive; letter-spacing: -0.01em; color: var(--flame-2); }
   .bc svg { position: absolute; left: 0.04em; bottom: -0.16em; width: 100%; height: 0.3em; }
   .be { flex-direction: column; gap: 6px; }
@@ -186,9 +187,8 @@
   .bm-us { display: inline-block; padding: 0 0.12em; margin: 0 0.04em; border-radius: 99px; background: var(--lemon); color: #16251A; transform: rotate(-6deg); }
   .bm-cook { color: var(--accent); }
   .bm svg { width: 0.5em; height: 0.5em; align-self: flex-start; margin-left: 0.04em; fill: #3E8E4F; }
-  .hero.compact .bb { flex-direction: row; align-items: baseline; gap: 0.2em; }
+  .hero.compact .bb { padding-bottom: 0; }
   .hero.compact .bb-rule, .hero.compact .be-rule { display: none; }
-  .hero.compact .bb-let { transform: none; }
 
   /* ── Barre du haut ─────────────────────────────── */
   .topbar {
@@ -217,8 +217,8 @@
   .hero { padding: 14px 0 22px; }
   .brand-link { color: inherit; text-decoration: none; -webkit-tap-highlight-color: transparent; }
   .brand-link:active { opacity: 0.6; }
-  .hero-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-  .hero-row .icon-btn { margin: -4px -10px 0 0; flex: none; }
+  .hero-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .hero-row .icon-btn { margin: 0 -10px 0 0; flex: none; }
   .hero.compact .hero-row { align-items: center; }
   .hero.compact .hero-row .icon-btn { margin-top: 0; }
   .topbar .wrap:empty { min-height: 0; }
@@ -601,14 +601,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.9.0"></script>
-<script src="extracteur.js?v=2.9.0"></script>
+<script src="config.js?v=2.9.1"></script>
+<script src="extracteur.js?v=2.9.1"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.9.0";
+const APP_VERSION = "2.9.1";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
