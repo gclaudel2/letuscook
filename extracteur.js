@@ -666,43 +666,91 @@
   }
 
   /** Analyse d'un HTML déjà récupéré (sans réseau) : utile aussi pour les tests. */
-  function extractFromHtml(html, sourceUrl) {
+  /**
+   * Analyse d'un HTML déjà récupéré (sans réseau). `log(message, état)` reçoit chaque étape.
+   * états : "run" (en cours), "ok", "info", "warn", "error".
+   */
+  function extractFromHtml(html, sourceUrl, log = () => {}) {
     const doc = new DOMParser().parseFromString(html, "text/html"); // DOMParser n'exécute aucun script
     const meta = getPageMeta(doc, sourceUrl);
+    const isComplete = (r) => !!r && r.ingredients.length > 0 && r.steps.length > 0;
+    const counts = (r) => `${r.ingredients.length} ingrédient${r.ingredients.length > 1 ? "s" : ""}, ${r.steps.length} étape${r.steps.length > 1 ? "s" : ""}`;
+
+    log("Recherche des données structurées de la recette (schema.org)…", "run");
     const candidates = findJsonLdRecipes(doc);
     let recipe = candidates.length ? jsonLdToRecipe(pickBestCandidate(candidates), sourceUrl, meta) : null;
-    const isComplete = (r) => !!r && r.ingredients.length > 0 && r.steps.length > 0;
+    if (isComplete(recipe)) log(`Données structurées trouvées : ${counts(recipe)}`, "ok");
+    else if (recipe) log(`Données structurées incomplètes (${counts(recipe)})`, "warn");
+    else log("Pas de données structurées sur cette page", "info");
 
     // Pas de JSON-LD exploitable : lecture du texte libre, toujours sans IA
     if (!isComplete(recipe)) {
+      log("Lecture du texte de la page (sans IA)…", "run");
       let found = null;
       try { found = extractHeuristic(doc, sourceUrl, meta); } catch (err) { console.warn("lecture texte libre", err); }
-      if (found) recipe = recipe ? mergeRecipes(recipe, found, "html") : found;
+      if (found) {
+        recipe = recipe ? mergeRecipes(recipe, found, "html") : found;
+        log(`Recette reconnue dans le texte : ${counts(found)}`, "ok");
+      } else {
+        log("Recette non reconnue dans le texte", "info");
+      }
     }
     return { recipe, complete: isComplete(recipe), meta, getText: () => extractMainText(doc) };
   }
 
-  async function extractRecipe(input) {
+  const PROVIDER_NAMES = { gemini: "Gemini", mistral: "Mistral", anthropic: "Claude", openai: "ChatGPT" };
+
+  /** onProgress(message, état) est appelé à chaque étape (journal affiché dans l'appli). */
+  async function extractRecipe(input, onProgress = () => {}) {
+    const t0 = performance.now();
+    const log = (message, status = "info") => {
+      try { onProgress(message, status, Math.round(performance.now() - t0)); } catch { /* affichage */ }
+    };
     const url = parseTargetUrl(input);
     const warnings = [];
 
-    const page = await callWorker("/page", { url });
-    const { recipe: partial, complete, meta, getText } = extractFromHtml(page.html, page.finalUrl || url);
-    if (complete) return { recipe: partial, warnings };
+    log(`Récupération de la page via le relais (${new URL(url).hostname})…`, "run");
+    let page;
+    try {
+      page = await callWorker("/page", { url });
+    } catch (err) {
+      log(err.message, "error");
+      throw err;
+    }
+    log(`Page reçue (${Math.max(1, Math.round(page.html.length / 1024))} Ko)`, "ok");
+
+    const { recipe: partial, complete, meta, getText } = extractFromHtml(page.html, page.finalUrl || url, log);
+    if (complete) {
+      log(partial.extractedVia === "jsonld" ? "Terminé sans IA (données structurées)" : "Terminé sans IA (lecture du texte)", "ok");
+      return { recipe: partial, warnings };
+    }
 
     const hasPartial = !!partial && (partial.ingredients.length > 0 || partial.steps.length > 0);
     const text = getText();
     if (text.length < CONFIG.MIN_TEXT_FOR_AI) {
-      if (hasPartial) return { recipe: partial, warnings: ["Recette incomplète : le site ne fournit pas toutes les informations."] };
+      if (hasPartial) {
+        log("Texte trop court pour l'IA : recette partielle conservée", "warn");
+        return { recipe: partial, warnings: ["Recette incomplète : le site ne fournit pas toutes les informations."] };
+      }
+      log("Pas assez de texte sur la page", "error");
       throw new ExtractError("NO_RECIPE", "Cette page ne contient pas de recette lisible.");
     }
 
+    log(`Analyse par l'IA (${text.length.toLocaleString("fr-FR")} caractères envoyés, 5 à 30 s)…`, "run");
     let ai = null;
     try {
       const res = await callWorker("/ia", { url: page.finalUrl || url, title: meta.title, text });
       if (res.recipe && res.recipe.found !== false) ai = aiToRecipe(res.recipe, page.finalUrl || url, meta);
       if (ai && ai.ingredients.length === 0 && ai.steps.length === 0) ai = null;
+      const who = PROVIDER_NAMES[res.provider] || "l'IA";
+      if (ai) {
+        ai.aiProvider = res.provider;
+        log(`Recette extraite par ${who} : ${ai.ingredients.length} ingrédients, ${ai.steps.length} étapes`, "ok");
+      } else {
+        log(`${who} n'a pas trouvé de recette dans la page`, "warn");
+      }
     } catch (err) {
+      log(err.message, hasPartial ? "warn" : "error");
       if (!hasPartial) throw err;
       warnings.push("Recette incomplète : " + err.message);
     }

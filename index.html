@@ -131,6 +131,22 @@
   .btn.danger { color: var(--danger); }
   .hint { color: var(--muted); font-size: 15px; margin: 14px 2px 0; }
 
+  .log { margin-top: 16px; padding: 12px 14px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); }
+  .log-title { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 6px; }
+  .log ol { list-style: none; margin: 0; padding: 0; }
+  .log li { display: flex; gap: 8px; align-items: baseline; padding: 4px 0; font-size: 15px; line-height: 1.35; }
+  .log-mark { flex: none; width: 16px; text-align: center; font-weight: 800; }
+  .log-msg { flex: 1; }
+  .log-time { flex: none; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .log-ok .log-mark, .log-done .log-mark { color: #2F7D32; }
+  .log-warn .log-mark { color: var(--accent); }
+  .log-error .log-mark, .log-error .log-msg { color: var(--danger); }
+  .log-info .log-mark, .log-info .log-msg { color: var(--muted); }
+  .log-run .log-mark { color: var(--accent); animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: 0.25; } }
+  @media (prefers-color-scheme: dark) { .log-ok .log-mark, .log-done .log-mark { color: #7BC67E; } }
+  .version { margin: 28px 0 0; text-align: center; font-size: 13px; color: var(--muted); }
+  .via { margin: 4px 0 0; font-size: 13px; color: var(--muted); }
   .notice { margin-top: 16px; padding: 14px 16px; border-radius: 14px; font-size: 16px; }
   .notice.error { background: color-mix(in srgb, var(--danger) 13%, transparent); color: var(--ink); border-left: 4px solid var(--danger); }
   .notice.warn { background: var(--accent-soft); border-left: 4px solid var(--accent); }
@@ -274,6 +290,7 @@
       </div>
       <p id="storage-info">Vos recettes restent sur cet appareil. Exportez-les de temps en temps pour en garder une copie.</p>
     </div>
+    <p class="version" id="settings-version"></p>
     <div class="actions">
       <button class="btn ghost" value="cancel" formnovalidate>Annuler</button>
       <button class="btn primary" value="save" style="margin-top:0">Enregistrer</button>
@@ -284,6 +301,10 @@
 <script src="extracteur.js"></script>
 <script>
 "use strict";
+
+/* ════════════ Version ════════════
+ * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
+const APP_VERSION = "1.4.0";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -390,6 +411,7 @@ const state = {
   lastUrl: "",
   lastError: "",
   loading: false,
+  log: [],            // journal de la dernière extraction : { message, status, ms }
 };
 
 async function loadRecipes() {
@@ -543,8 +565,42 @@ function renderExtractPanel() {
   return h("section", { "aria-label": "Extraire une recette" },
     form,
     state.lastError && h("div", { class: "notice error", role: "alert" }, state.lastError),
+    renderLog(),
     h("p", { class: "hint" }, "Dans Safari : Partager › Copier, puis revenez ici et touchez le bouton Coller."),
+    h("p", { class: "version" }, `Zéro Blabla Cuisine · version ${APP_VERSION}`),
   );
+}
+
+/* Journal de progression de l'extraction */
+const LOG_MARKS = { run: "…", done: "✓", ok: "✓", info: "·", warn: "!", error: "✕" };
+function logLine(entry) {
+  return h("li", { class: `log-${entry.status}` },
+    h("span", { class: "log-mark", "aria-hidden": "true" }, LOG_MARKS[entry.status] || "·"),
+    h("span", { class: "log-msg" }, entry.message),
+    h("span", { class: "log-time" }, `${(entry.ms / 1000).toFixed(1).replace(".", ",")} s`));
+}
+function renderLog() {
+  if (!state.log.length) return null;
+  return h("div", { class: "log", "aria-live": "polite" },
+    h("div", { class: "log-title" }, state.loading ? "Extraction en cours" : "Journal de la dernière extraction"),
+    h("ol", { id: "extract-log" }, state.log.map(logLine)));
+}
+function pushLog(message, status, ms) {
+  // une étape "en cours" devient terminée dès que la suivante arrive
+  const last = state.log[state.log.length - 1];
+  if (last && last.status === "run") last.status = "done";
+  const entry = { message, status, ms };
+  state.log.push(entry);
+  const list = document.getElementById("extract-log");
+  if (list) {
+    const prev = list.lastElementChild;
+    if (prev && prev.classList.contains("log-run")) { prev.classList.replace("log-run", "log-done"); prev.querySelector(".log-mark").textContent = "✓"; }
+    const li = logLine(entry);
+    list.append(li);
+    li.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  } else if (state.loading && !location.hash.startsWith("#/r") && location.hash !== "#/apercu") {
+    renderHome();
+  }
 }
 
 async function onExtract(event) {
@@ -558,12 +614,13 @@ async function onExtract(event) {
   try { url = ZBC.parseTargetUrl(raw); } catch (err) { state.lastError = err.message; return renderHome(); }
 
   const existing = findBySource(url);
-  if (existing) { toast("Déjà dans votre carnet"); return go(`#/r/${encodeURIComponent(existing.id)}`); }
+  if (existing) { state.log = []; toast("Déjà dans votre carnet"); return go(`#/r/${encodeURIComponent(existing.id)}`); }
 
   state.loading = true;
+  state.log = [];
   renderHome();
   try {
-    const { recipe, warnings } = await ZBC.extractRecipe(url);
+    const { recipe, warnings } = await ZBC.extractRecipe(url, pushLog);
     state.preview = recipe;
     state.previewWarnings = warnings;
     state.lastUrl = "";
@@ -675,6 +732,12 @@ function renderRecipe(recipe, { saved }) {
   if (chips.length) header.push(h("ul", { class: "chips", "aria-label": "Temps" }, chips.map(([label, min]) => h("li", { class: "chip" }, `${label} `, h("b", {}, formatMinutes(min))))));
   const source = safeHttpUrl(recipe.sourceUrl);
   if (source) header.push(h("a", { class: "source", href: source, target: "_blank", rel: "noopener noreferrer" }, "Source : ", h("span", {}, recipe.siteName || hostOf(source)), " ↗"));
+  const VIA = {
+    jsonld: "données structurées du site (sans IA)",
+    html: "lecture du texte de la page (sans IA)",
+    llm: `analyse IA${recipe.aiProvider ? ` (${{ gemini: "Gemini", mistral: "Mistral", anthropic: "Claude", openai: "ChatGPT" }[recipe.aiProvider] || recipe.aiProvider})` : ""}`,
+  };
+  if (VIA[recipe.extractedVia]) header.push(h("p", { class: "via" }, `Extraite par ${VIA[recipe.extractedVia]}`));
   if (!saved && state.previewWarnings.length) header.push(h("div", { class: "notice warn" }, state.previewWarnings.join(" ")));
 
   /* Portions */
@@ -814,6 +877,7 @@ function openSettings() {
   try { worker = localStorage.getItem(ZBC.WORKER_URL_KEY) || ""; code = localStorage.getItem(ZBC.ACCESS_CODE_KEY) || ""; } catch { /* */ }
   $("#set-worker").value = worker || ZBC.getWorkerUrl();
   $("#set-code").value = code;
+  $("#settings-version").textContent = `Zéro Blabla Cuisine · version ${APP_VERSION}`;
   const dlg = $("#settings");
   if (typeof dlg.showModal === "function") dlg.showModal();
 }
