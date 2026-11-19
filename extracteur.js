@@ -1133,8 +1133,11 @@
     { id: "michelin-ch", name: "Guide Michelin Suisse", host: "guide.michelin.com", maxPages: 20,
       page: (n) => (n === 1 ? "https://guide.michelin.com/ch/fr/articles/dining-in" : `https://guide.michelin.com/ch/fr/articles/dining-in/page/${n}`),
       motif: "^/ch/fr/article/dining-in/[\\w.-]+$" },
+    { id: "michelin-be", name: "Guide Michelin Belgique", host: "guide.michelin.com", maxPages: 20,
+      page: (n) => (n === 1 ? "https://guide.michelin.com/be/fr/articles/dining-in" : `https://guide.michelin.com/be/fr/articles/dining-in/page/${n}`),
+      motif: "^/be/fr/article/dining-in/[\\w.-]+$" },
     { id: "doitinparis", name: "Do It in Paris (chefs)", host: "www.doitinparis.com", maxPages: 1,
-      page: () => "https://www.doitinparis.com/fr//recettes/recettes-de-chefs",
+      page: () => "https://www.doitinparis.com/fr/recettes/recettes-de-chefs",
       motif: "^/fr/[\\w-]+-\\d+$" },
     { id: "lhr-recettes", name: "L'Hôtellerie Restauration (recettes)", host: "www.lhotellerie-restauration.fr", maxPages: 50,
       page: (n) => (n === 1 ? "https://www.lhotellerie-restauration.fr/actualite/theme/recettes" : `https://www.lhotellerie-restauration.fr/actualite/theme/recettes?page=${n}`),
@@ -1260,6 +1263,47 @@
     return CHEF_CATALOGS.some((c) => !off.includes(c.id) && (!idx.sites[c.id] || Date.now() - idx.sites[c.id].at > INDEX_MAX_AGE));
   };
 
+  // ── Photos des recettes : cache local + aperçus groupés par le relais ──
+  const IMG_CACHE_KEY = "zbc.imgCache";
+  const IMG_CACHE_MAX = 1500;
+  let imgCache = null;
+  const readImgCache = () => {
+    if (!imgCache) { try { imgCache = JSON.parse(localStorage.getItem(IMG_CACHE_KEY) || "{}") || {}; } catch { imgCache = {}; } }
+    return imgCache;
+  };
+  let imgSaveTimer = 0;
+  function saveImgCache() {
+    clearTimeout(imgSaveTimer);
+    imgSaveTimer = setTimeout(() => {
+      const keys = Object.keys(imgCache);
+      if (keys.length > IMG_CACHE_MAX) keys.slice(0, keys.length - IMG_CACHE_MAX).forEach((k) => delete imgCache[k]);
+      try { localStorage.setItem(IMG_CACHE_KEY, JSON.stringify(imgCache)); } catch { /* stockage plein */ }
+    }, 300);
+  }
+  const cachedImage = (url) => readImgCache()[url] || "";
+  /** Mémorise la photo d'une recette (cache + index des chefs) pour l'afficher tout de suite la prochaine fois. */
+  function rememberImage(url, img) {
+    if (!url || !img || !/^https?:\/\//i.test(img)) return;
+    const c = readImgCache();
+    if (c[url] === img) return;
+    delete c[url]; c[url] = img; // plus récent en dernier
+    saveImgCache();
+  }
+  let apercusMissing = false; // relais pas encore mis à jour : on attend l'analyse des pages
+  /** Photos principales de plusieurs recettes, en un seul appel au relais : { url: photo } */
+  async function previewImages(urls) {
+    const list = [...new Set(urls)].filter(Boolean).slice(0, 12);
+    if (!list.length || apercusMissing) return {};
+    try {
+      const { images } = await callWorker("/apercus", { urls: list });
+      Object.entries(images || {}).forEach(([u, img]) => rememberImage(u, img));
+      return images || {};
+    } catch (err) {
+      if (err.code === "NOT_FOUND") apercusMissing = true;
+      return {};
+    }
+  }
+
   /** Recettes de chefs de l'index qui correspondent à la recherche. */
   function searchChefIndex(words, perSource = 4) {
     const idx = readChefIndex();
@@ -1268,7 +1312,7 @@
       idx.sites[c.id].items
         .filter((it) => matchesQuery(`${it.t} ${new URL(it.u).pathname}`, words))
         .slice(0, perSource)
-        .map((it) => ({ url: it.u, title: it.t, image: it.i || undefined, site: c.name, chefSite: true })));
+        .map((it) => ({ url: it.u, title: it.t, image: it.i || cachedImage(it.u) || undefined, site: c.name, chefSite: true })));
   }
 
   /**
@@ -1295,7 +1339,11 @@
     for (let i = 0; i < 4 && results.length < MAX_RESULTS; i++) {
       for (const list of lists) {
         const r = list[i];
-        if (r && !seen.has(r.url) && results.length < MAX_RESULTS) { seen.add(r.url); results.push(r); }
+        if (r && !seen.has(r.url) && results.length < MAX_RESULTS) {
+          seen.add(r.url);
+          if (r.image) rememberImage(r.url, r.image); else r.image = cachedImage(r.url) || undefined;
+          results.push(r);
+        }
       }
     }
     return results;
@@ -1323,7 +1371,7 @@
 
   window.ZBC = {
     CONFIG, ACCESS_CODE_KEY, WORKER_URL_KEY, getWorkerUrl, ExtractError,
-    extractRecipe, extractFromHtml, parseTargetUrl, searchRecipes, analyzeUrl, synthesize, refreshChefIndex, chefIndexStatus, chefIndexStale, setChefSourceEnabled, CHEF_CATALOGS, getSearchSites, saveSearchSites, resetSearchSites, rememberRemovedSite, normalizeHost, testSearchSite, DEFAULT_SEARCH_SITES,
+    extractRecipe, extractFromHtml, parseTargetUrl, searchRecipes, analyzeUrl, previewImages, rememberImage, cachedImage, synthesize, refreshChefIndex, chefIndexStatus, chefIndexStale, setChefSourceEnabled, CHEF_CATALOGS, getSearchSites, saveSearchSites, resetSearchSites, rememberRemovedSite, normalizeHost, testSearchSite, DEFAULT_SEARCH_SITES,
     parseIngredient, formatIngredient, formatQuantity, parseDuration, parseServings,
   };
 })();

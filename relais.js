@@ -8,6 +8,7 @@
  *   POST /ia    { url, title, text }  → { ok, recipe }              (secours IA, si pas de JSON-LD)
  *   POST /voix  { text }              → { ok, audio, mimeType }     (lecture à voix haute, via Gemini)
  *   POST /liens { url, motif }        → { ok, links: [{u,t,i}] }    (liens de recettes d'une page de liste)
+ *   POST /apercus { urls: [...] }     → { ok, images: {url: photo} } (photos des recettes, pour les vignettes)
  *
  * Variables (Settings → Variables and Secrets) :
  *   ALLOWED_ORIGINS    ex. "https://votre-compte.github.io"  (plusieurs : séparées par des virgules)
@@ -422,6 +423,26 @@ function stripTags(html) {
     .replace(/&#(\d+);/g, (_m, n) => String.fromCharCode(Number(n)))
     .replace(/\s+/g, " ").trim();
 }
+const NOT_A_DISH = /logo|icon|avatar|sprite|placeholder|pixel|blank|spacer|badge|flag|picto|gravatar/i;
+/** Toutes les images plausibles (pas les logos ni pictos) d'un bout de HTML, dans l'ordre. */
+function imagesIn(html) {
+  const out = [];
+  const tags = /<(?:img|source)\b[^>]*>/gi;
+  let t;
+  while ((t = tags.exec(html || ""))) {
+    const tag = t[0];
+    const attr = (name) => (new RegExp(`\\b${name}\\s*=\\s*["']([^"']+)["']`, "i").exec(tag) || [])[1] || "";
+    const w = parseInt(attr("width"), 10);
+    if (w && w < 80) continue;
+    const srcset = attr("data-srcset") || attr("srcset");
+    const fromSet = srcset ? srcset.split(",").map((x) => x.trim().split(/\s+/)[0]).filter(Boolean).pop() : "";
+    const u = [attr("data-src"), attr("data-lazy-src"), attr("data-original"), fromSet, attr("src")]
+      .find((x) => x && !/^data:/i.test(x) && !/\.(?:svg|gif)(?:[?#]|$)/i.test(x));
+    if (u && !NOT_A_DISH.test(u) && !NOT_A_DISH.test(attr("alt")) && !NOT_A_DISH.test(attr("class"))) out.push(u);
+  }
+  return out;
+}
+
 function imageIn(html) {
   const tag = /<(?:img|source)\b[^>]*>/i.exec(html || "");
   if (!tag) return "";
@@ -442,6 +463,7 @@ async function handleLinks(body) {
   const anchors = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
   let m;
   const html = page.html.replace(/<script[\s\S]*?<\/script>|<!--[\s\S]*?-->/gi, " ");
+  const spots = []; // position de chaque lien de recette, pour retrouver la photo de sa « carte »
   while ((m = anchors.exec(html)) && found.size < MAX_LINKS) {
     const href = (/\bhref\s*=\s*["']([^"']+)["']/i.exec(m[1]) || [])[1];
     if (!href) continue;
@@ -450,6 +472,7 @@ async function handleLinks(body) {
     if (u.hostname !== base.hostname || !re.test(u.pathname)) continue;
     u.search = ""; u.hash = "";
     const key = u.toString();
+    spots.push({ key, start: m.index, end: anchors.lastIndex });
     const title = (stripTags(m[2]) || (/\btitle\s*=\s*["']([^"']+)["']/i.exec(m[1]) || [])[1] || "").slice(0, 160);
     let img = imageIn(m[2]);
     if (img) { try { img = new URL(img, base).toString(); } catch { img = ""; } }
@@ -458,7 +481,69 @@ async function handleLinks(body) {
     if (!prev.i && img) prev.i = img;
     found.set(key, prev);
   }
+  // Photo hors du lien (fréquent : <div class="card"><img…><a>Titre</a></div>) : on la cherche
+  // juste avant le lien, sans dépasser le lien de recette précédent, sinon juste après.
+  const done = new Set();
+  spots.forEach((sp, n) => {
+    const item = found.get(sp.key);
+    if (item.i || done.has(sp.key)) return;
+    done.add(sp.key);
+    let from = Math.max(0, sp.start - 1500), to = Math.min(html.length, sp.end + 1500);
+    for (let k = n - 1; k >= 0; k--) if (spots[k].key !== sp.key) { from = Math.max(from, spots[k].end); break; }
+    for (let k = n + 1; k < spots.length; k++) if (spots[k].key !== sp.key) { to = Math.min(to, spots[k].start); break; }
+    const img = imagesIn(html.slice(from, sp.start)).pop() || imagesIn(html.slice(sp.end, to))[0];
+    if (img) { try { item.i = new URL(img, base).toString(); } catch { /* adresse invalide */ } }
+  });
   return { ok: true, finalUrl: page.finalUrl, links: [...found.values()] };
+}
+
+// ── /apercus : photo principale de plusieurs recettes d'un coup ─────────
+const MAX_APERCUS = 12;
+const APERCU_BYTES = 400 * 1024; // la photo (og:image, JSON-LD) est dans le début de la page
+
+function mainImageOf(html) {
+  const metas = html.match(/<meta\b[^>]*>/gi) || [];
+  const found = {};
+  for (const tag of metas) {
+    const a = (name) => (new RegExp(`\\b${name}\\s*=\\s*["']([^"']*)["']`, "i").exec(tag) || [])[1] || "";
+    const key = (a("property") || a("name") || a("itemprop")).toLowerCase();
+    const content = a("content");
+    if (content && ["og:image", "og:image:url", "og:image:secure_url", "twitter:image", "twitter:image:src", "image", "thumbnailurl"].includes(key) && !found[key]) found[key] = content;
+  }
+  const meta = found["og:image"] || found["og:image:secure_url"] || found["og:image:url"] || found["twitter:image"] || found["twitter:image:src"] || found.image || found.thumbnailurl;
+  if (meta) return meta;
+  const ld = /"image"\s*:\s*(?:\[\s*)?(?:\{[^}]*?"url"\s*:\s*)?"(https?:[^"]+)"/i.exec(html);
+  if (ld) return ld[1].replace(/\\\//g, "/");
+  const link = /<link\b[^>]*rel=["']image_src["'][^>]*href=["']([^"']+)["']/i.exec(html);
+  return link ? link[1] : "";
+}
+
+async function apercuOne(raw) {
+  try {
+    const url = assertAllowedUrl(String(raw || "").trim());
+    const res = await fetch(url.toString(), { headers: BROWSER_HEADERS, redirect: "follow", signal: AbortSignal.timeout(8000) });
+    if (!res.ok) { try { await res.body?.cancel(); } catch { /* rien */ } return ""; }
+    const finalUrl = res.url || url.toString();
+    assertAllowedUrl(finalUrl);
+    const html = decodeHtml(await readLimited(res, APERCU_BYTES), res.headers.get("content-type") || "");
+    const img = mainImageOf(html);
+    if (!img) return "";
+    const abs = new URL(img.replace(/&amp;/g, "&"), finalUrl);
+    return /^https?:$/.test(abs.protocol) ? abs.toString() : "";
+  } catch {
+    return "";
+  }
+}
+
+async function handleApercus(body) {
+  const urls = Array.isArray(body?.urls) ? [...new Set(body.urls.map(String))].slice(0, MAX_APERCUS) : [];
+  if (!urls.length) throw new RelayError("INVALID_URL", "Aucune adresse.", 400);
+  const images = {};
+  const queue = urls.slice();
+  await Promise.all(Array.from({ length: 6 }, async () => {
+    while (queue.length) { const u = queue.shift(); images[u] = await apercuOne(u); }
+  }));
+  return { ok: true, images };
 }
 
 // ── Point d'entrée ───────────────────────────────────────────────
@@ -469,7 +554,7 @@ export default {
 
     const { pathname } = new URL(request.url);
     try {
-      if (request.method !== "POST") throw new RelayError("NOT_FOUND", "Relais Zéro Blabla Cuisine : utilisez POST /page, /ia, /voix ou /liens.", 404);
+      if (request.method !== "POST") throw new RelayError("NOT_FOUND", "Relais Zéro Blabla Cuisine : utilisez POST /page, /ia, /voix, /liens ou /apercus.", 404);
       const origin = request.headers.get("origin") || "";
       if (!isAllowedOrigin(origin, env)) {
         throw new RelayError(
@@ -484,6 +569,7 @@ export default {
       if (pathname === "/ia") return json(await handleAi(body, env), 200, cors);
       if (pathname === "/voix") return json(await handleVoice(body, env), 200, cors);
       if (pathname === "/liens") return json(await handleLinks(body), 200, cors);
+      if (pathname === "/apercus") return json(await handleApercus(body), 200, cors);
       throw new RelayError("NOT_FOUND", "Route inconnue.", 404);
     } catch (err) {
       if (err instanceof RelayError) return json({ ok: false, error: { code: err.code, message: err.message } }, err.status, cors);

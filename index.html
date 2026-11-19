@@ -436,7 +436,7 @@
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.4.0";
+const APP_VERSION = "2.5.0";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1433,6 +1433,17 @@ async function runSearch(raw) {
   S.results = found.map((f, index) => ({ ...f, index, status: "pending", recipe: null, error: "" }));
   renderHome();
 
+  // Photos manquantes : demandées tout de suite au relais, en 2 lots parallèles, sans attendre l'analyse
+  const noPhoto = S.results.filter((r) => !r.image).map((r) => r.url);
+  for (let i = 0; i < noPhoto.length; i += 10) {
+    ZBC.previewImages(noPhoto.slice(i, i + 10)).then((images) => {
+      if (id !== S.id) return;
+      let changed = false;
+      S.results.forEach((r) => { if (!r.image && images[r.url]) { r.image = images[r.url]; changed = true; } });
+      if (changed) refreshResults();
+    });
+  }
+
   // Analyse des pages, 4 à la fois, SANS IA : on remplit les fiches au fur et à mesure
   const queue = S.results.slice();
   const worker = async () => {
@@ -1443,6 +1454,7 @@ async function runSearch(raw) {
         const { recipe, complete, finalUrl } = await ZBC.analyzeUrl(res.url);
         res.recipe = recipe;
         res.finalUrl = finalUrl;
+        if (recipe && recipe.image) ZBC.rememberImage(res.url, recipe.image);
         res.status = complete ? "ok" : "partial";
         if (!complete) res.error = "Recette non détectée automatiquement · touchez pour l'extraire";
       } catch (err) {
