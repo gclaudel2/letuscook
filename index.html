@@ -264,7 +264,10 @@
   .result:active { transform: scale(0.99); }
   .result.fail, .result.partial { opacity: 0.72; }
   .r-thumb { flex: none; width: 92px; height: 92px; border-radius: 12px; overflow: hidden; background: var(--accent-soft); display: grid; place-items: center; }
-  .r-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .r-thumb { position: relative; }
+  .r-thumb img, .card .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; transition: opacity 0.25s; }
+  .r-thumb img.loading, .card .thumb img.loading { position: absolute; inset: 0; opacity: 0; }
+  .card .thumb { position: relative; }
   .r-thumb .initial { font: 700 32px/1 var(--serif); color: var(--accent); }
   .r-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
   .r-name { font: 700 17px/1.25 var(--sans); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
@@ -348,7 +351,7 @@
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "1.7.1";
+const APP_VERSION = "1.8.0";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -700,7 +703,7 @@ async function runExtraction(raw) {
 }
 
 /* ════════════ Recherche de recettes ════════════ */
-const SEARCH_CONCURRENCY = 4;
+const SEARCH_CONCURRENCY = 5;
 const totalMinutes = (r) => (r ? r.totalTimeMin ?? (r.prepTimeMin != null || r.cookTimeMin != null ? (r.prepTimeMin || 0) + (r.cookTimeMin || 0) : null) : null);
 const isEasy = (r) => !!r && (r.difficulty === "Très facile" || r.difficulty === "Facile");
 
@@ -733,7 +736,7 @@ function renderSearchPanel() {
     parts.push(renderSearchControls());
     parts.push(h("ul", { class: "results", id: "results" }, visibleResults().map(resultCard)));
   } else if (!S.loading && !S.error) {
-    parts.push(h("p", { class: "hint" }, `Cherchez une recette sur ${ZBC.SEARCH_SITES.map((x) => x.name).join(", ")}. Comparez temps, difficulté et notes d'un coup d'œil, puis ouvrez-la en mode cuisine.`));
+    parts.push(h("p", { class: "hint" }, `Cherchez une recette sur ${ZBC.SEARCH_SITES.length} sites de cuisine (${ZBC.SEARCH_SITES.map((x) => x.name).join(", ")}). Comparez temps, difficulté et notes d'un coup d'œil, puis ouvrez-la en mode cuisine.`));
   }
   parts.push(h("p", { class: "version" }, `Zéro Blabla Cuisine · version ${APP_VERSION}`));
   return h("section", { "aria-label": "Chercher une recette" }, parts);
@@ -806,13 +809,9 @@ function fact(iconName, text, strong) {
 function resultCard(res) {
   const r = res.recipe;
   const saved = findBySource(res.url);
-  const img = safeHttpUrl(r && r.image);
-  const thumb = h("div", { class: "r-thumb" }, h("span", { class: "initial", "aria-hidden": "true" }, ((r && r.title) || res.title || "?").trim().charAt(0).toUpperCase()));
-  if (img) {
-    const el = h("img", { src: img, alt: "", loading: "lazy", referrerpolicy: "no-referrer" });
-    el.addEventListener("load", () => thumb.replaceChildren(el));
-    el.addEventListener("error", () => el.remove());
-  }
+  // Photo de la page de résultats tout de suite, sinon celle trouvée en analysant la recette
+  const img = safeHttpUrl(res.image) || safeHttpUrl(r && r.image);
+  const thumb = thumbWithImage("r-thumb", img, ((r && r.title) || res.title || "?").trim().charAt(0).toUpperCase());
 
   const title = (r && r.title) || res.title.split(/\s+[-|–—·»]\s+/)[0];
   const site = res.site || (r && r.siteName) || hostOf(res.url);
@@ -949,14 +948,23 @@ function renderCarnet() {
   return h("section", { "aria-label": "Mes recettes" }, search, list.length ? cards : h("p", { class: "empty" }, "Aucune recette ne correspond."));
 }
 
-function recipeCard(r) {
-  const img = safeHttpUrl(r.image);
-  const thumb = h("div", { class: "thumb" }, h("span", { class: "initial", "aria-hidden": "true" }, (r.title || "?").trim().charAt(0).toUpperCase()));
-  if (img) {
-    const el = h("img", { src: img, alt: "", loading: "lazy", referrerpolicy: "no-referrer" });
-    el.addEventListener("load", () => thumb.replaceChildren(el));
-    el.addEventListener("error", () => el.remove());
+/** Vignette : l'initiale s'affiche tant que la photo charge ; la photo la remplace dès qu'elle est prête. */
+function thumbWithImage(cls, url, letter) {
+  const initial = h("span", { class: "initial", "aria-hidden": "true" }, letter);
+  const thumb = h("div", { class: cls }, initial);
+  if (url) {
+    const img = h("img", { src: url, alt: "", loading: "lazy", decoding: "async", referrerpolicy: "no-referrer", class: "loading" });
+    const shown = () => { img.classList.remove("loading"); initial.remove(); };
+    img.addEventListener("load", shown);
+    img.addEventListener("error", () => img.remove());
+    thumb.append(img); // dans la page dès maintenant : sinon le chargement différé ne démarre jamais
+    if (img.complete && img.naturalWidth) shown(); // déjà en cache
   }
+  return thumb;
+}
+
+function recipeCard(r) {
+  const thumb = thumbWithImage("thumb", safeHttpUrl(r.image), (r.title || "?").trim().charAt(0).toUpperCase());
   const meta = [r.siteName, formatMinutes(r.totalTimeMin)].filter(Boolean).join(" · ");
   return h("a", { class: "card", href: `#/r/${encodeURIComponent(r.id)}` },
     thumb,

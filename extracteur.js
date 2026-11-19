@@ -826,20 +826,30 @@
   // ── Recherche directe sur les sites de recettes (sans service tiers) ──
   /*
    * L'appli ouvre la page de résultats de recherche de chaque site (via la route /page du relais)
-   * et en extrait les liens de recettes. Pour ajouter un site : son adresse de recherche
-   * et la forme de ses adresses de recettes.
+   * et en extrait les liens de recettes, avec leur photo.
+   *
+   * Pour ajouter un site : son nom, son domaine et une ou plusieurs adresses de recherche
+   * (essayées dans l'ordre jusqu'à ce qu'une réponde). "recipe" (facultatif) décrit la forme
+   * exacte de ses adresses de recettes ; sans lui, les liens sont reconnus automatiquement.
    */
   const enc = encodeURIComponent;
+  const wp = (host) => (q) => `https://${host}/?s=${enc(q)}`; // recherche WordPress standard
   const SEARCH_SITES = [
-    { name: "Marmiton", host: "www.marmiton.org", url: (q) => `https://www.marmiton.org/recettes/recherche.aspx?aqt=${enc(q)}`, recipe: /^\/recettes\/recette_[\w-]+\.aspx$/i },
-    { name: "750g", host: "www.750g.com", url: (q) => `https://www.750g.com/recherche/?q=${enc(q)}`, recipe: /^\/[\w-]+-r\d+\.htm$/i },
-    { name: "Cuisine AZ", host: "www.cuisineaz.com", url: (q) => `https://www.cuisineaz.com/recettes/recherche_terme.aspx?recherche=${enc(q)}`, recipe: /^\/recettes\/[\w-]+-\d+\.aspx$/i },
-    { name: "Journal des Femmes", host: "cuisine.journaldesfemmes.fr", url: (q) => `https://cuisine.journaldesfemmes.fr/s/?f_libelle=${enc(q)}`, recipe: /^\/recette\/\d+-[\w-]+$/i },
-    { name: "Ricardo", host: "www.ricardocuisine.com", url: (q) => `https://www.ricardocuisine.com/recherche?searchValue=${enc(q)}`, recipe: /^\/recettes\/\d+-[\w-]+$/i },
-    { name: "Papilles et Pupilles", host: "www.papillesetpupilles.fr", url: (q) => `https://www.papillesetpupilles.fr/?s=${enc(q)}`, recipe: /^\/\d{4}\/\d{2}\/[\w-]+\.html\/?$/i },
+    { name: "Marmiton", host: "www.marmiton.org", url: [(q) => `https://www.marmiton.org/recettes/recherche.aspx?aqt=${enc(q)}`], recipe: /^\/recettes\/recette_[\w-]+\.aspx$/i },
+    { name: "Elle à table", host: "www.elle.fr", url: [(q) => `https://www.elle.fr/Recherche?q=${enc(q)}`, (q) => `https://www.elle.fr/recherche?q=${enc(q)}`], recipe: /^\/Elle-a-Table\/Recettes-de-cuisine\/[\w-]+-\d+$/i },
+    { name: "Cuisine Actuelle", host: "www.cuisineactuelle.fr", url: [(q) => `https://www.cuisineactuelle.fr/recherche?q=${enc(q)}`, (q) => `https://www.cuisineactuelle.fr/recherche?search=${enc(q)}`], recipe: /^\/recettes\/[\w-]+-\d+$/i },
+    { name: "750g", host: "www.750g.com", url: [(q) => `https://www.750g.com/recherche/?q=${enc(q)}`], recipe: /^\/[\w-]+-r\d+\.htm$/i },
+    { name: "Journal des Femmes", host: "cuisine.journaldesfemmes.fr", url: [(q) => `https://cuisine.journaldesfemmes.fr/s/?f_libelle=${enc(q)}`], recipe: /^\/recette\/\d+-[\w-]+$/i },
+    { name: "Cuisine AZ", host: "www.cuisineaz.com", url: [(q) => `https://www.cuisineaz.com/recettes/recherche_terme.aspx?recherche=${enc(q)}`], recipe: /^\/recettes\/[\w-]+-\d+\.aspx$/i },
+    { name: "Ricardo", host: "www.ricardocuisine.com", url: [(q) => `https://www.ricardocuisine.com/recherche?searchValue=${enc(q)}`], recipe: /^\/recettes\/\d+-[\w-]+$/i },
+    { name: "Papilles et Pupilles", host: "www.papillesetpupilles.fr", url: [wp("www.papillesetpupilles.fr")], recipe: /^\/\d{4}\/\d{2}\/[\w-]+\.html\/?$/i },
+    { name: "Chef Simon", host: "chefsimon.com", url: [(q) => `https://chefsimon.com/recherche?q=${enc(q)}`, (q) => `https://chefsimon.com/search?q=${enc(q)}`] },
+    { name: "Hervé Cuisine", host: "www.hervecuisine.com", url: [wp("www.hervecuisine.com")] },
+    { name: "Il était une fois la pâtisserie", host: "www.iletaitunefoislapatisserie.com", url: [wp("www.iletaitunefoislapatisserie.com")] },
+    { name: "Ptitchef", host: "www.ptitchef.com", url: [(q) => `https://www.ptitchef.com/recettes/recherche?q=${enc(q)}`, (q) => `https://www.ptitchef.com/recherche?q=${enc(q)}`] },
   ];
   const PER_SITE = 3;
-  const MAX_RESULTS = 12;
+  const MAX_RESULTS = 15;
 
   const fold = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/œ/g, "oe").replace(/æ/g, "ae");
   const STOP = new Set(["recette", "recettes", "avec", "sans", "pour", "les", "des", "aux", "une", "facile", "rapide", "maison"]);
@@ -856,41 +866,112 @@
   }
   const titleFromSlug = (path) => {
     const slug = decodeURIComponent(path.split("/").filter(Boolean).pop() || "")
-      .replace(/\.(aspx|html?|php)$/i, "").replace(/^recette_/, "").replace(/^\d+-|[-_]r?\d+$/g, "").replace(/[-_]+/g, " ").trim();
+      .replace(/\.(aspx|html?|php)$/i, "").replace(/^recette_/, "").replace(/^\d+-|[-_]r?\d+$|-fid-\d+$/g, "").replace(/[-_]+/g, " ").trim();
     return slug ? slug.charAt(0).toUpperCase() + slug.slice(1) : "";
   };
 
+  /** Adresse "qui ressemble à une recette" quand le site n'a pas de forme connue. */
+  const NOT_RECIPE_PATH = /\/(?:recherche|search|tag|tags|categor(?:y|ie|ies)|rubrique|theme|auteur|author|page\/\d+|feed|wp-|login|compte|account|newsletter|contact|mentions|cgu|cookies?|abonnement|boutique|shop|videos?|dossiers?|selection|idees?|menus?|top-|les-meilleures)(?:[/-]|$)/i;
+  function looksLikeRecipePath(path) {
+    if (NOT_RECIPE_PATH.test(path) || /\/recettes?-de-/i.test(path)) return false;
+    const last = path.split("/").filter(Boolean).pop() || "";
+    return last.replace(/\.(aspx|html?|php)$/i, "").length >= 8 && /[a-z]-[a-z]/i.test(last);
+  }
+
+  /** Meilleure source d'une image (gère le chargement différé : data-src, srcset…). */
+  function bestFromSrcset(srcset) {
+    if (!srcset) return "";
+    const items = srcset.split(",").map((s) => s.trim().split(/\s+/)).filter((p) => p[0]);
+    if (!items.length) return "";
+    const width = (p) => parseInt(p[1], 10) || 0;
+    items.sort((a, b) => Math.abs(width(a) - 400) - Math.abs(width(b) - 400));
+    return items[0][0];
+  }
+  function imageFromElement(root, base) {
+    if (!root) return "";
+    const nodes = [...root.querySelectorAll("img, picture source")].slice(0, 4);
+    for (const el of nodes) {
+      const candidates = [
+        el.getAttribute("data-src"), el.getAttribute("data-lazy-src"), el.getAttribute("data-original"),
+        bestFromSrcset(el.getAttribute("data-srcset")), bestFromSrcset(el.getAttribute("srcset")), el.getAttribute("src"),
+      ];
+      for (const c of candidates) {
+        if (!c || /^data:/i.test(c) || /\.svg(?:[?#]|$)/i.test(c) || /(?:pixel|placeholder|blank|spacer|logo|avatar|icon)/i.test(c)) continue;
+        try {
+          const u = new URL(c.trim(), base);
+          if (/^https?:$/.test(u.protocol)) return u.toString();
+        } catch { /* adresse invalide */ }
+      }
+    }
+    return "";
+  }
+  /** Photo d'un résultat : dans le lien lui-même, sinon dans sa "carte" (bloc qui l'entoure). */
+  function imageForLink(a, base) {
+    const own = imageFromElement(a, base);
+    if (own) return own;
+    let box = a.parentElement;
+    for (let i = 0; i < 4 && box; i++, box = box.parentElement) {
+      if (box.querySelectorAll("a[href]").length > 4 || (box.textContent || "").length > 700) break;
+      const img = imageFromElement(box, base);
+      if (img) return img;
+    }
+    return "";
+  }
+
   function linksFromSearchPage(site, html, words) {
     const doc = new DOMParser().parseFromString(html, "text/html");
-    const found = new Map(); // url → titre
-    const add = (href, title) => {
+    const base = `https://${site.host}/`;
+    const sameSite = (h) => h.replace(/^www\./, "") === site.host.replace(/^www\./, "");
+    const isRecipe = (path) => (site.recipe ? site.recipe.test(path) : looksLikeRecipePath(path));
+    const found = new Map(); // url → { title, image }
+    const add = (href, title, image) => {
       let u;
-      try { u = new URL(href, `https://${site.host}/`); } catch { return; }
-      if (u.hostname.replace(/^www\./, "") !== site.host.replace(/^www\./, "")) return;
-      if (!site.recipe.test(u.pathname)) return;
+      try { u = new URL(href, base); } catch { return; }
+      if (!sameSite(u.hostname) || !isRecipe(u.pathname)) return;
       u.search = ""; u.hash = "";
       const key = u.toString();
       const clean = normSpace(title);
-      if (!found.has(key) || (!found.get(key) && clean)) found.set(key, clean.length >= 3 && clean.length <= 140 ? clean : "");
+      const prev = found.get(key) || { title: "", image: "" };
+      found.set(key, {
+        title: prev.title || (clean.length >= 3 && clean.length <= 140 ? clean : ""),
+        image: prev.image || image || "",
+      });
     };
-    // 1. Liens visibles
+    // 1. Liens visibles (avec titre et photo)
     doc.querySelectorAll("a[href]").forEach((a) => {
       const title = a.getAttribute("title") || a.querySelector("h1,h2,h3,h4,[class*=title i]")?.textContent || a.textContent || a.querySelector("img[alt]")?.getAttribute("alt");
-      add(a.getAttribute("href"), title || "");
+      add(a.getAttribute("href"), title || "", imageForLink(a, base));
     });
     // 2. Liens présents dans les données de la page (sites construits en JavaScript)
     const raw = html.replace(/\\\//g, "/");
     const re = new RegExp(`(?:https?://${site.host.replace(/\./g, "\\.")})?(/[\\w%./-]{6,200})`, "gi");
-    for (const m of raw.matchAll(re)) if (site.recipe.test(m[1])) add(m[1], "");
+    for (const m of raw.matchAll(re)) if (isRecipe(m[1])) add(m[1], "", "");
 
     const out = [];
-    for (const [url, title] of found) {
-      const t = title || titleFromSlug(new URL(url).pathname);
-      if (!matchesQuery(`${t} ${new URL(url).pathname}`, words)) continue;
-      out.push({ url, title: t, site: site.name });
+    for (const [url, info] of found) {
+      const path = new URL(url).pathname;
+      const t = info.title || titleFromSlug(path);
+      if (!matchesQuery(`${t} ${path}`, words)) continue;
+      out.push({ url, title: t, image: info.image || undefined, site: site.name });
       if (out.length >= PER_SITE) break;
     }
     return out;
+  }
+
+  async function searchOneSite(site, query, words) {
+    let lastError = null;
+    for (const makeUrl of site.url) {
+      try {
+        const page = await callWorker("/page", { url: makeUrl(query) });
+        const links = linksFromSearchPage(site, page.html, words);
+        if (links.length || makeUrl === site.url[site.url.length - 1]) return { links, error: null };
+        lastError = null; // page lue mais vide : on tente l'adresse suivante
+      } catch (err) {
+        if (["NO_RELAY", "UNAUTHORIZED", "FORBIDDEN_ORIGIN", "OFFLINE", "RELAY_UNREACHABLE"].includes(err.code)) throw err;
+        lastError = err;
+      }
+    }
+    return { links: [], error: lastError ? lastError.message : null };
   }
 
   /**
@@ -902,16 +983,9 @@
     if (query.length < 2) throw new ExtractError("INVALID_QUERY", "Tapez au moins 2 lettres.");
     const words = queryWords(query);
     const perSite = await Promise.all(SEARCH_SITES.map(async (site) => {
-      try {
-        const page = await callWorker("/page", { url: site.url(query) });
-        const links = linksFromSearchPage(site, page.html, words);
-        onSite(site.name, links.length, null);
-        return links;
-      } catch (err) {
-        if (err.code === "NO_RELAY" || err.code === "UNAUTHORIZED" || err.code === "FORBIDDEN_ORIGIN" || err.code === "OFFLINE" || err.code === "RELAY_UNREACHABLE") throw err;
-        onSite(site.name, 0, err.message);
-        return [];
-      }
+      const { links, error } = await searchOneSite(site, query, words);
+      onSite(site.name, links.length, error);
+      return links;
     }));
     const results = [];
     const seen = new Set();
