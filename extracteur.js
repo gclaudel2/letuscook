@@ -1127,6 +1127,18 @@
     { id: "lhr", name: "L'Hôtellerie Restauration", host: "www.lhotellerie-restauration.fr", maxPages: 80,
       page: (n) => (n === 1 ? "https://www.lhotellerie-restauration.fr/actualite/theme/recette" : `https://www.lhotellerie-restauration.fr/actualite/theme/recette?page=${n}`),
       motif: "^/actualite/[\\w-]+$" },
+    { id: "lefooding", name: "Le Fooding", host: "lefooding.com", maxPages: 60,
+      page: (n) => (n === 1 ? "https://lefooding.com/recettes/" : `https://lefooding.com/recettes/?page=${n}`),
+      motif: "^/recettes/[\\w-]+/?$" },
+    { id: "michelin-ch", name: "Guide Michelin Suisse", host: "guide.michelin.com", maxPages: 20,
+      page: (n) => (n === 1 ? "https://guide.michelin.com/ch/fr/articles/dining-in" : `https://guide.michelin.com/ch/fr/articles/dining-in/page/${n}`),
+      motif: "^/ch/fr/article/dining-in/[\\w.-]+$" },
+    { id: "doitinparis", name: "Do It in Paris (chefs)", host: "www.doitinparis.com", maxPages: 1,
+      page: () => "https://www.doitinparis.com/fr//recettes/recettes-de-chefs",
+      motif: "^/fr/[\\w-]+-\\d+$" },
+    { id: "lhr-recettes", name: "L'Hôtellerie Restauration (recettes)", host: "www.lhotellerie-restauration.fr", maxPages: 50,
+      page: (n) => (n === 1 ? "https://www.lhotellerie-restauration.fr/actualite/theme/recettes" : `https://www.lhotellerie-restauration.fr/actualite/theme/recettes?page=${n}`),
+      motif: "^/actualite/[\\w-]+$" },
   ];
   const CHEF_INDEX_KEY = "zbc.chefIndex";
   const CHEF_SOURCES_OFF_KEY = "zbc.chefSourcesOff";
