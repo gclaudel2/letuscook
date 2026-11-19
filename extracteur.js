@@ -1050,6 +1050,11 @@
     return { count: links.length, error, sample: links[0] ? links[0].title : "" };
   }
 
+  /** Texte → voix (Gemini via le relais) : { audio (base64), mimeType } */
+  async function synthesize(text) {
+    return callWorker("/voix", { text });
+  }
+
   /** Récupère et analyse une page SANS IA (pour les fiches de résultats). */
   async function analyzeUrl(url) {
     const page = await callWorker("/page", { url });
@@ -1060,7 +1065,7 @@
 
   window.ZBC = {
     CONFIG, ACCESS_CODE_KEY, WORKER_URL_KEY, getWorkerUrl, ExtractError,
-    extractRecipe, extractFromHtml, parseTargetUrl, searchRecipes, analyzeUrl, getSearchSites, saveSearchSites, resetSearchSites, normalizeHost, testSearchSite, DEFAULT_SEARCH_SITES,
+    extractRecipe, extractFromHtml, parseTargetUrl, searchRecipes, analyzeUrl, synthesize, getSearchSites, saveSearchSites, resetSearchSites, normalizeHost, testSearchSite, DEFAULT_SEARCH_SITES,
     parseIngredient, formatIngredient, formatQuantity, parseDuration, parseServings,
   };
 })();

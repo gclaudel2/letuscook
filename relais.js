@@ -6,6 +6,7 @@
  *
  *   POST /page  { url }               → { ok, html, finalUrl }      (récupère la page de recette)
  *   POST /ia    { url, title, text }  → { ok, recipe }              (secours IA, si pas de JSON-LD)
+ *   POST /voix  { text }              → { ok, audio, mimeType }     (lecture à voix haute, via Gemini)
  *
  * Variables (Settings → Variables and Secrets) :
  *   ALLOWED_ORIGINS    ex. "https://votre-compte.github.io"  (plusieurs : séparées par des virgules)
@@ -17,6 +18,9 @@
  *     ANTHROPIC_API_KEY  (Claude, payant)              ANTHROPIC_MODEL défaut : claude-haiku-5-5
  *     OPENAI_API_KEY     (ChatGPT, payant)             OPENAI_MODEL    obligatoire si OpenAI
  *   LLM_PROVIDER       facultatif : fournisseur à essayer en premier ("gemini", "mistral", "anthropic", "openai")
+ *   Voix (lecture des étapes, audible même en mode silencieux) : utilise GEMINI_API_KEY
+ *     GEMINI_TTS_MODEL   facultatif, défaut : gemini-3.1-flash-tts-preview
+ *     GEMINI_TTS_VOICE   facultatif, défaut : Kore
  */
 
 const FETCH_TIMEOUT_MS = 12000;
@@ -355,6 +359,53 @@ async function handleAi(body, env) {
 }
 
 
+
+// ── /voix : texte → parole (Gemini), joué par l'appli comme un fichier audio ──
+const TTS_TIMEOUT_MS = 25000;
+
+async function handleVoice(body, env) {
+  if (!env.GEMINI_API_KEY) {
+    throw new RelayError("VOICE_DISABLED", "La lecture par Gemini nécessite le secret GEMINI_API_KEY sur Cloudflare.", 422);
+  }
+  const text = String(body?.text || "").replace(/\s+/g, " ").trim().slice(0, 1500);
+  if (!text) throw new RelayError("INVALID_TEXT", "Texte vide.", 400);
+  const models = [...new Set([env.GEMINI_TTS_MODEL || "gemini-3.1-flash-tts-preview", "gemini-2.5-flash-preview-tts"])];
+  const voice = env.GEMINI_TTS_VOICE || "Kore";
+
+  let busy = false;
+  for (const model of models) {
+    let res;
+    try {
+      res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: `Say in a calm, clear French voice: ${text}` }] }],
+          generationConfig: {
+            responseModalities: ["AUDIO"],
+            speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } },
+          },
+        }),
+        signal: AbortSignal.timeout(TTS_TIMEOUT_MS),
+      });
+    } catch {
+      busy = true;
+      continue;
+    }
+    if (res.status === 429 || res.status >= 500) { busy = true; continue; }
+    if (res.status === 404 || res.status === 400) continue; // modèle indisponible : on essaie le suivant
+    if (!res.ok) throw new RelayError("VOICE_FAILED", `La voix Gemini a répondu une erreur (${res.status}).`, 502);
+    const data = await res.json().catch(() => ({}));
+    const part = (data.candidates?.[0]?.content?.parts || []).find((p) => p.inlineData && p.inlineData.data);
+    if (part) return { ok: true, audio: part.inlineData.data, mimeType: part.inlineData.mimeType || "audio/L16;rate=24000", model };
+  }
+  throw new RelayError(
+    busy ? "VOICE_BUSY" : "VOICE_FAILED",
+    busy ? "La voix Gemini est saturée ou son quota gratuit est atteint pour le moment." : "Aucun modèle de voix Gemini n'a répondu.",
+    busy ? 503 : 502,
+  );
+}
+
 // ── Point d'entrée ───────────────────────────────────────────────
 export default {
   async fetch(request, env) {
@@ -363,7 +414,7 @@ export default {
 
     const { pathname } = new URL(request.url);
     try {
-      if (request.method !== "POST") throw new RelayError("NOT_FOUND", "Relais Zéro Blabla Cuisine : utilisez POST /page ou /ia.", 404);
+      if (request.method !== "POST") throw new RelayError("NOT_FOUND", "Relais Zéro Blabla Cuisine : utilisez POST /page, /ia ou /voix.", 404);
       const origin = request.headers.get("origin") || "";
       if (!isAllowedOrigin(origin, env)) {
         throw new RelayError(
@@ -376,6 +427,7 @@ export default {
       const body = await request.json().catch(() => null);
       if (pathname === "/page") return json(await handlePage(body), 200, cors);
       if (pathname === "/ia") return json(await handleAi(body, env), 200, cors);
+      if (pathname === "/voix") return json(await handleVoice(body, env), 200, cors);
       throw new RelayError("NOT_FOUND", "Route inconnue.", 404);
     } catch (err) {
       if (err instanceof RelayError) return json({ ok: false, error: { code: err.code, message: err.message } }, err.status, cors);

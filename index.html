@@ -426,7 +426,7 @@
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.0.2";
+const APP_VERSION = "2.1.0";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -682,63 +682,101 @@ function motionBetween(gray, prev) {
 const GESTURE_LEVELS = { faible: 0.38, normale: 0.26, forte: 0.16 };
 
 /**
- * Son même en mode silencieux (bouton vibreur) : iOS coupe le son "d'ambiance" des pages web,
- * mais pas celui des lecteurs audio. Pendant la lecture, on passe la session audio en
- * "playback" (iOS 17+) et on joue en boucle un son muet dans un vrai lecteur audio.
- * Revers : comme une appli de podcast, cela met en pause la musique d'une autre appli.
+ * Son même en mode silencieux (bouton vibreur).
+ * iOS coupe la voix intégrée (synthèse vocale) en mode silencieux, mais pas un lecteur audio.
+ * La lecture passe donc par un vrai fichier audio fabriqué par Gemini (via le relais),
+ * joué dans un lecteur <audio>. Revers : comme un podcast, cela met en pause la musique
+ * d'une autre appli pendant la lecture.
  */
+function makeWav(pcmBytes, rate) {
+  const head = new ArrayBuffer(44), v = new DataView(head);
+  const w = (o, str) => { for (let i = 0; i < str.length; i++) v.setUint8(o + i, str.charCodeAt(i)); };
+  w(0, "RIFF"); v.setUint32(4, 36 + pcmBytes.length, true); w(8, "WAVE"); w(12, "fmt ");
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  w(36, "data"); v.setUint32(40, pcmBytes.length, true);
+  return new Blob([head, pcmBytes], { type: "audio/wav" });
+}
+/** Réponse Gemini (base64 + type) → adresse d'un fichier audio jouable. */
+function audioUrlFrom(base64, mimeType) {
+  const bin = atob(base64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const mt = String(mimeType || "");
+  if (/wav|mpeg|mp3|ogg|aac|mp4/i.test(mt)) return URL.createObjectURL(new Blob([bytes], { type: mt }));
+  const rate = Number((/rate=(\d+)/.exec(mt) || [])[1]) || 24000; // PCM 16 bits brut
+  return URL.createObjectURL(makeWav(bytes, rate));
+}
+
 const Sound = {
-  el: null, active: false, unlocked: false,
-  silentWavUrl() {
-    const rate = 8000, n = rate / 2; // 0,5 s de silence
-    const buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
-    const w = (o, str) => { for (let i = 0; i < str.length; i++) v.setUint8(o + i, str.charCodeAt(i)); };
-    w(0, "RIFF"); v.setUint32(4, 36 + n * 2, true); w(8, "WAVE"); w(12, "fmt ");
-    v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
-    v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
-    w(36, "data"); v.setUint32(40, n * 2, true);
-    return URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
-  },
+  el: null, resolveEnd: null,
   player() {
     if (!this.el) {
-      this.el = new Audio(this.silentWavUrl());
-      this.el.loop = true;
+      this.el = new Audio();
       this.el.setAttribute("playsinline", "");
       this.el.preload = "auto";
     }
     return this.el;
   },
   setSessionType(type) { try { if (navigator.audioSession) navigator.audioSession.type = type; } catch { /* iOS < 17 */ } },
-  /** À appeler lors d'un toucher : autorise ensuite la lecture sans nouveau toucher. */
+  /** À appeler lors d'un toucher : iOS n'autorise ensuite ce lecteur à jouer sans nouveau toucher. */
   unlock() {
-    if (this.unlocked) return;
     const el = this.player();
-    el.play().then(() => { this.unlocked = true; if (!this.active) el.pause(); }).catch(() => {});
+    if (el.dataset.unlocked) return;
+    el.src = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=";
+    el.play().then(() => { el.pause(); el.dataset.unlocked = "1"; }).catch(() => {});
   },
-  /** Active le son malgré le mode silencieux. */
-  start() {
-    this.active = true;
+  /** Joue un fichier audio ; se termine à la fin du son (ou à l'arrêt). */
+  play(url) {
+    this.stop(false);
     this.setSessionType("playback");
-    this.player().play().then(() => { this.unlocked = true; }).catch(() => {});
+    const el = this.player();
+    el.src = url;
+    return new Promise((resolve, reject) => {
+      this.resolveEnd = resolve;
+      el.onended = () => { this.resolveEnd = null; resolve(); };
+      el.onerror = () => { this.resolveEnd = null; reject(new Error("lecture audio impossible")); };
+      el.play().then(() => { el.dataset.unlocked = "1"; }).catch((err) => { this.resolveEnd = null; reject(err); });
+    });
   },
-  stop() {
-    this.active = false;
-    if (this.el) this.el.pause();
-    this.setSessionType("auto");
+  stop(resetSession = true) {
+    if (this.el) { this.el.onended = null; this.el.onerror = null; this.el.pause(); }
+    if (this.resolveEnd) { const r = this.resolveEnd; this.resolveEnd = null; r(); }
+    if (resetSession) this.setSessionType("auto");
   },
+};
+
+/** Voix Gemini : fichiers audio mis en cache, étape suivante préparée à l'avance. */
+const Voice = {
+  cache: new Map(), pausedUntil: 0, disabled: false,
+  available() { return !this.disabled && Date.now() > this.pausedUntil && !!ZBC.getWorkerUrl(); },
+  get(text) {
+    if (!this.cache.has(text)) {
+      const p = ZBC.synthesize(text).then((r) => audioUrlFrom(r.audio, r.mimeType));
+      p.catch((err) => {
+        this.cache.delete(text);
+        if (err && err.code === "VOICE_DISABLED") this.disabled = true;
+        else this.pausedUntil = Date.now() + 60000; // on réessaiera dans une minute
+      });
+      this.cache.set(text, p);
+      if (this.cache.size > 40) this.cache.delete(this.cache.keys().next().value);
+    }
+    return this.cache.get(text);
+  },
+  prefetch(text) { if (text && this.available()) this.get(text).catch(() => {}); },
 };
 
 const HandsFree = {
   ctx: null,                       // fourni par le mode cuisine
   voiceOn: false, gestureOn: false, readOn: false,
-  rec: null, restartTimer: 0, speaking: false, lastCmdAt: 0, lastCmdKey: "",
+  rec: null, restartTimer: 0, speaking: false, speakToken: 0, lastCmdAt: 0, lastCmdKey: "",
   stream: null, video: null, timer: 0, prevGray: null, detector: createWaveDetector(),
   audio: null,
   status: "",
 
   get voiceSupported() { return !!(window.SpeechRecognition || window.webkitSpeechRecognition); },
   get gestureSupported() { return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia); },
-  get readSupported() { return "speechSynthesis" in window; },
+  get readSupported() { return "speechSynthesis" in window || typeof Audio !== "undefined"; },
 
   attach(ctx) {
     this.ctx = ctx;
@@ -749,7 +787,7 @@ const HandsFree = {
   detach() {
     this.readOn = false;
     this.stopVoice(); this.stopGesture(); this.stopReading();
-    Sound.stop(); this.ctx = null;
+    Sound.stop(true); this.ctx = null;
   },
 
   /* ── retours visuels et sonores ── */
@@ -757,7 +795,6 @@ const HandsFree = {
   refresh() { if (this.ctx && this.ctx.refreshBar) this.ctx.refreshBar(); },
   beep(freq = 880) {
     try {
-      if (!Sound.active) Sound.setSessionType("playback");
       this.audio = this.audio || new (window.AudioContext || window.webkitAudioContext)();
       const o = this.audio.createOscillator(), g = this.audio.createGain();
       o.frequency.value = freq; g.gain.value = 0.06;
@@ -832,39 +869,64 @@ const HandsFree = {
 
   /* ── lecture à voix haute ── */
   speak(text, force = false) {
-    if (!text || !this.readSupported || (!this.readOn && !force)) return;
-    try {
-      Sound.start(); // audible même en mode silencieux
-      speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(text);
-      u.lang = "fr-FR";
-      const fr = speechSynthesis.getVoices().find((v) => /^fr[-_]FR/i.test(v.lang)) || speechSynthesis.getVoices().find((v) => /^fr/i.test(v.lang));
-      if (fr) u.voice = fr;
-      // Le micro est coupé pendant la lecture, sinon l'appli s'écouterait elle-même
-      this.speaking = true;
-      if (this.rec) { try { this.rec.abort(); } catch { /* */ } }
-      const done = () => {
-        this.speaking = false;
-        if (!this.readOn) Sound.stop(); // lecture ponctuelle ("répète") : on rend la main à la musique
-        if (this.voiceOn) this.restartTimer = setTimeout(() => this.listen(), 300);
-      };
-      u.onend = done; u.onerror = done;
-      speechSynthesis.speak(u);
-    } catch { this.speaking = false; }
+    if (!text || (!this.readOn && !force)) return;
+    const token = ++this.speakToken;
+    // Le micro est coupé pendant la lecture, sinon l'appli s'écouterait elle-même
+    this.speaking = true;
+    clearTimeout(this.restartTimer);
+    if (this.rec) { try { this.rec.abort(); } catch { /* */ } }
+    try { speechSynthesis.cancel(); } catch { /* */ }
+    Sound.stop(false);
+    const finish = () => {
+      if (token !== this.speakToken) return;
+      this.speaking = false;
+      if (!this.readOn) Sound.setSessionType("auto");
+      if (this.voiceOn) this.restartTimer = setTimeout(() => this.listen(), 300);
+    };
+    (async () => {
+      if (Voice.available()) {
+        try {
+          const url = await Voice.get(text);
+          if (token !== this.speakToken) return;
+          await Sound.play(url); // audible même en mode silencieux
+          return finish();
+        } catch (err) {
+          if (token !== this.speakToken) return;
+          console.warn("voix Gemini indisponible", err);
+          this.setStatus(err && err.code === "VOICE_DISABLED" ? "Voix de l'iPhone (Gemini non configuré)" : "Voix Gemini indisponible : voix de l'iPhone");
+        }
+      }
+      // Secours : voix intégrée (muette si l'iPhone est en mode silencieux)
+      if (!("speechSynthesis" in window)) return finish();
+      try {
+        const u = new SpeechSynthesisUtterance(text);
+        u.lang = "fr-FR";
+        const voices = speechSynthesis.getVoices();
+        const fr = voices.find((v) => /^fr[-_]FR/i.test(v.lang)) || voices.find((v) => /^fr/i.test(v.lang));
+        if (fr) u.voice = fr;
+        u.onend = finish; u.onerror = finish;
+        speechSynthesis.speak(u);
+      } catch { finish(); }
+    })();
   },
   stopReading() {
+    this.speakToken++;
     this.speaking = false;
     try { speechSynthesis.cancel(); } catch { /* */ }
-    if (!this.readOn) Sound.stop();
+    Sound.stop(!this.readOn);
     if (this.voiceOn) this.listen();
   },
   toggleRead() {
-    if (!this.readSupported) { toast("La lecture à voix haute n'est pas disponible sur cet appareil."); return; }
+    Sound.unlock(); // ce toucher autorise le lecteur audio pour la suite
     this.readOn = !this.readOn;
-    if (this.readOn) Sound.start(); // ce toucher autorise le son pour la suite
-    else Sound.stop();
-    if (this.readOn) this.speak(this.ctx ? this.ctx.currentText() || "Lecture des étapes activée." : "", true);
-    else this.stopReading();
+    if (this.readOn) {
+      Sound.setSessionType("playback");
+      this.speak(this.ctx ? this.ctx.currentText() || "Lecture des étapes activée." : "", true);
+      if (this.ctx && this.ctx.nextText) Voice.prefetch(this.ctx.nextText());
+    } else {
+      this.stopReading();
+      Sound.setSessionType("auto");
+    }
     this.refresh();
   },
 
@@ -1550,6 +1612,7 @@ function renderRecipe(recipe, { saved }) {
     if (scroll && i >= 0) stepButtons[i].scrollIntoView({ behavior: "smooth", block: "center" });
     refreshBar();
     if (scroll && i >= 0) HandsFree.speak(stepSpeech(i));
+    if (HandsFree.readOn && i + 1 < recipe.steps.length) Voice.prefetch(stepSpeech(i + 1));
   }
 
   /* Barre mains libres (en bas de l'écran) */
@@ -1639,6 +1702,7 @@ function renderRecipe(recipe, { saved }) {
     goto: (i) => (i >= 0 && i < recipe.steps.length ? goStep(i) : toast(`Il n'y a que ${recipe.steps.length} étapes.`)),
     currentText: () => (activeStep >= 0 ? stepSpeech(activeStep) : recipe.steps[0] ? `Pas encore commencé. ${stepSpeech(0)}` : ""),
     ingredientsText: () => `Ingrédients. ${ingItems.map((li) => li.querySelector(".txt").textContent).join(". ")}.`,
+    nextText: () => (activeStep + 1 < recipe.steps.length ? stepSpeech(Math.max(0, activeStep + 1)) : ""),
     refreshBar,
   });
   updateIngProgress();
