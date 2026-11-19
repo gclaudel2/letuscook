@@ -188,6 +188,8 @@
 
   .ingredients { list-style: none; margin: 0; padding: 0; }
   .ingredients li + li { border-top: 1px solid var(--line); }
+  .ingredients li.ing-sub, .ingredients li.ing-sub + li { border-top: 0; }
+  .ingredients li.ing-sub .sub { margin: 18px 0 2px; }
   .ing { display: flex; align-items: flex-start; gap: 14px; padding: 13px 4px; cursor: pointer; }
   .ing input { position: absolute; opacity: 0; pointer-events: none; }
   .ing .box {
@@ -713,6 +715,14 @@ function renderRecipe(recipe, { saved }) {
     };
     return li;
   });
+  // Sous-rubriques d'ingrédients ("La base", "La crème"…)
+  const ingNodes = [];
+  let lastIngSection;
+  recipe.ingredients.forEach((ing, i) => {
+    if (ing.section && ing.section !== lastIngSection) ingNodes.push(h("li", { class: "ing-sub" }, h("h3", { class: "sub" }, ing.section)));
+    lastIngSection = ing.section;
+    ingNodes.push(ingItems[i]);
+  });
   function updateIngProgress() {
     ingProgress.textContent = recipe.ingredients.length ? `${checked.size} / ${recipe.ingredients.length}` : "";
   }
@@ -783,7 +793,7 @@ function renderRecipe(recipe, { saved }) {
     recipe.ingredients.length ? servingsBox : null,
     recipe.ingredients.length ? resetBtn : null,
     recipe.ingredients.length && h("div", { class: "section-title" }, h("h2", {}, "Ingrédients"), ingProgress),
-    recipe.ingredients.length && h("ul", { class: "ingredients" }, ingItems),
+    recipe.ingredients.length && h("ul", { class: "ingredients" }, ingNodes),
     recipe.steps.length && h("div", { class: "section-title" }, h("h2", {}, "Préparation")),
     recipe.steps.length && h("p", { class: "step-hint" }, "Touchez l'étape en cours pour la repérer."),
     recipe.steps.length && h("ol", { class: "steps" }, stepNodes),

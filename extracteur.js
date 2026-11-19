@@ -362,6 +362,225 @@
     return text.slice(0, CONFIG.MAX_AI_CHARS);
   }
 
+  // ── Lecture sans IA des recettes "en texte libre" ──────────────
+  /*
+   * Pour les blogs sans données structurées. On repère :
+   *  - les ingrédients : lignes/paragraphes/listes où la plupart des éléments commencent par
+   *    une quantité ("225 g de biscuits, 65 g de beurre…"), avec leur rubrique ("La base :") ;
+   *  - les étapes : liste numérotée de phrases, sinon paragraphes numérotés "1. …",
+   *    sinon paragraphes sous un titre "Préparation" ;
+   *  - portions et temps : "Pour 6 à 8 personnes", "préparation 30 min", "cuisson 1h30".
+   */
+  const normSpace = (s) => String(s || "").replace(/ | /g, " ").replace(/\s+/g, " ").trim();
+  const hasQty = (s) => parseIngredient(s).quantity != null;
+  const IMPERATIVE = /\b(?!(?:assez|chez)\b)[a-zàâçéèêëîïôûùüÿœ]{3,}ez\b/i; // "Préchauffez", "mélangez"…
+  const NOT_INGREDIENT_LABEL = /ustensile|mat[ée]riel|astuce|conseil|note|remarque|variante|conservation|pour \d|personne|portion|temps|pr[ée]paration|cuisson|repos/i;
+  const STEP_HEADING = /pr[ée]paration|[ée]tapes?|instructions|r[ée]alisation|d[ée]roul[ée]|m[ée]thode|la recette/i;
+  const ING_HEADING = /ingr[ée]dients?/i;
+
+  /** Découpe "225 g de biscuits (moitié A, moitié B), 65 g de beurre, 1,5 kg…" aux virgules de premier niveau. */
+  function splitItems(text) {
+    const parts = [];
+    let depth = 0, cur = "";
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (c === "(" || c === "[") depth++;
+      else if ((c === ")" || c === "]") && depth > 0) depth--;
+      const decimal = c === "," && /\d/.test(text[i - 1] || "") && /\d/.test(text[i + 1] || "");
+      if ((c === "," || c === ";") && depth === 0 && !decimal) { parts.push(cur); cur = ""; continue; }
+      cur += c;
+    }
+    parts.push(cur);
+    return parts
+      .flatMap((p) => p.split(/\s\+\s(?=\d)/)) // "300 g de X + 100 g de Y"
+      .map((s) => s.trim().replace(/^(?:et|and)\s+/i, "").replace(/[.;:]+$/, "").trim())
+      .filter(Boolean);
+  }
+
+  /** Lignes d'un bloc, en respectant les <br>. */
+  function blockLines(el) {
+    const c = el.cloneNode(true);
+    c.querySelectorAll("br").forEach((b) => b.replaceWith("\n"));
+    return (c.textContent || "").split("\n").map(normSpace).filter(Boolean);
+  }
+
+  /** Classe une ligne : "ing" (ingrédients sûrs), "maybe" (courte, sans quantité : "sel, poivre"), "label" (titre seul), "other". */
+  function classifyLine(line, fromList) {
+    let label = null;
+    let body = line;
+    const m = /^([^:]{2,50}?)\s*:\s*(.*)$/.exec(line);
+    if (m && !m[1].includes(",") && !/https?$/i.test(m[1])) { label = normSpace(m[1]); body = m[2]; }
+    if (label && !body) return { kind: "label", label };
+    if (label && NOT_INGREDIENT_LABEL.test(label)) return { kind: "other", label };
+
+    const items = fromList ? [body] : splitItems(body);
+    if (!items.length) return { kind: "other" };
+    const withQty = items.filter(hasQty).length;
+    const short = items.every((s) => s.length <= 110);
+    const prose = /[.!?]\s+[A-ZÀ-Ý]/.test(body) || items.some((s) => IMPERATIVE.test(s));
+
+    if (short && !prose) {
+      if (items.length >= 2 && withQty >= 2 && withQty / items.length >= 0.5) return { kind: "ing", label, items };
+      if (items.length === 1 && withQty === 1 && body.length <= 90) return { kind: "ing", label, items };
+      if (body.length <= 70 && withQty === 0) return { kind: "maybe", label, items };
+    }
+    return { kind: "other", label, text: line };
+  }
+
+  function linkRatio(el) {
+    const total = (el.textContent || "").trim().length || 1;
+    let linked = 0;
+    el.querySelectorAll("a").forEach((a) => { linked += (a.textContent || "").trim().length; });
+    return linked / total;
+  }
+
+  function extractHeuristic(doc, sourceUrl, meta) {
+    const d = doc.cloneNode(true);
+    d.querySelectorAll(NOISE + ',[class*="comment" i],[id*="comment" i],[class*="menu" i],[class*="navigation" i]').forEach((el) => el.remove());
+    const root = d.body;
+    if (!root) return null;
+
+    // 1. Parcours des blocs dans l'ordre du document
+    const BLOCKS = "h1, h2, h3, h4, h5, h6, p, ul, ol, div";
+    const entries = []; // { kind, label, items, text, section, el }
+    let section = null;
+    let afterStepHeading = false;
+    for (const el of root.querySelectorAll(BLOCKS)) {
+      const tag = el.tagName;
+      if (tag !== "UL" && tag !== "OL" && el.closest("li")) continue; // contenu d'un élément de liste : traité avec la liste
+      if (/^H[1-6]$/.test(tag)) {
+        const t = normSpace(el.textContent);
+        afterStepHeading = STEP_HEADING.test(t) && !ING_HEADING.test(t);
+        const isTitle = tag === "H1" || (meta.title && meta.title.toLowerCase().includes(t.toLowerCase()));
+        section = !afterStepHeading && !ING_HEADING.test(t) && !isTitle && t.length <= 50 ? t.replace(/\s*:$/, "") : null;
+        entries.push({ kind: "heading", text: t, step: afterStepHeading });
+        continue;
+      }
+      if (tag === "DIV" && el.querySelector("p, div, ul, ol, table, h1, h2, h3, h4, h5, h6")) continue; // conteneur
+      if (tag === "UL" || tag === "OL") {
+        if (el.parentElement && el.parentElement.closest("ul, ol")) continue; // sous-liste
+        const lis = [...el.children].filter((c) => c.tagName === "LI");
+        if (!lis.length || linkRatio(el) > 0.6) continue;
+        const texts = lis.map((li) => normSpace(li.textContent)).filter(Boolean);
+        entries.push({ kind: "list", ordered: tag === "OL", texts, section, step: afterStepHeading });
+        continue;
+      }
+      // Intertitre sans deux-points : paragraphe court entièrement en gras, ou "Ingrédients pour 4 personnes", "Préparation"…
+      const lines = blockLines(el);
+      const boldText = normSpace([...el.querySelectorAll("strong, b")].map((s) => s.textContent).join(" "));
+      const whole = normSpace(el.textContent);
+      const looksLikeTitle =
+        lines.length === 1 && whole.length <= 60 && !hasQty(whole) &&
+        ((boldText && boldText.length >= whole.length - 2 && !/[.!?]$/.test(whole)) ||
+          /^(?:les?\s+)?(?:ingr[ée]dients?|pr[ée]paration|[ée]tapes?|instructions|r[ée]alisation|pour (?:la|le|les|l['’]) )/i.test(whole));
+      if (looksLikeTitle) {
+        const t = whole.replace(/\s*:$/, "");
+        const isStep = STEP_HEADING.test(t) && !ING_HEADING.test(t) && !/^pour /i.test(t);
+        afterStepHeading = isStep;
+        section = !isStep && !ING_HEADING.test(t) && !NOT_INGREDIENT_LABEL.test(t) && !(meta.title && meta.title.toLowerCase().includes(t.toLowerCase())) ? t : null;
+        entries.push({ kind: "heading", text: t, step: isStep });
+        continue;
+      }
+      for (const line of lines) {
+        const c = classifyLine(line, false);
+        if (c.kind === "label") {
+          const isStepLabel = STEP_HEADING.test(c.label) && !ING_HEADING.test(c.label);
+          afterStepHeading = isStepLabel;
+          section = !isStepLabel && !ING_HEADING.test(c.label) && !NOT_INGREDIENT_LABEL.test(c.label) ? c.label : null;
+          entries.push({ kind: "heading", text: c.label, step: isStepLabel });
+          continue;
+        }
+        entries.push({ ...c, section: c.label || section, text: line, step: afterStepHeading });
+      }
+    }
+
+    // 2. Ingrédients : lignes sûres + lignes courtes sans quantité qui les suivent ("sel, poivre")
+    const ingredients = [];
+    let prevWasIng = false;
+    for (const e of entries) {
+      if (e.kind === "list" && !e.step) {
+        const cls = e.texts.map((t) => classifyLine(t, true));
+        const ing = cls.filter((c) => c.kind === "ing").length;
+        const ok = e.texts.length >= 2 && ing / e.texts.length >= 0.5 && cls.every((c) => c.kind === "ing" || c.kind === "maybe");
+        if (ok) {
+          e.texts.forEach((t) => ingredients.push({ ...parseIngredient(t), section: e.section || undefined }));
+          prevWasIng = true;
+        } else prevWasIng = false;
+        continue;
+      }
+      if (e.kind === "ing" || (e.kind === "maybe" && prevWasIng)) {
+        e.items.forEach((t) => ingredients.push({ ...parseIngredient(t), section: e.section || undefined }));
+        prevWasIng = true;
+      } else if (e.kind !== "heading" || e.step) {
+        prevWasIng = false;
+      }
+    }
+
+    // 3. Étapes : listes numérotées de phrases…
+    let steps = [];
+    for (const e of entries) {
+      if (e.kind !== "list" || (!e.ordered && !e.step)) continue;
+      const avg = e.texts.reduce((n, t) => n + t.length, 0) / e.texts.length;
+      const qtyRatio = e.texts.filter((t) => classifyLine(t, true).kind === "ing").length / e.texts.length;
+      if (e.texts.length >= 2 && avg >= 25 && qtyRatio < 0.5) {
+        e.texts.forEach((t) => steps.push({ text: t.replace(STEP_NUMBERING, "").trim() }));
+        e.isSteps = true;
+      }
+    }
+    // Petites recettes annexes après les étapes ("Le coulis : 300 g de…" puis "Mixez le tout…")
+    const lastStepList = entries.map((e) => !!e.isSteps).lastIndexOf(true);
+    if (lastStepList >= 0) {
+      let annexSection = null;
+      for (const e of entries.slice(lastStepList + 1)) {
+        if (e.kind === "ing") annexSection = e.section || null;
+        else if (e.kind === "other" && annexSection && e.text && e.text.length >= 15 && IMPERATIVE.test(e.text)) {
+          steps.push({ text: e.text.replace(STEP_NUMBERING, "").trim(), section: annexSection });
+        } else if (e.kind === "heading" || e.kind === "list") annexSection = null;
+      }
+    }
+    // … sinon paragraphes numérotés "1. …", "Étape 2 : …"
+    if (steps.length < 2) {
+      const numbered = entries.filter((e) => e.kind === "other" && e.text && /^(?:[ée]tape\s*)?\d{1,2}\s*[.):–-]\s*\S/i.test(e.text));
+      if (numbered.length >= 2) steps = numbered.map((e) => ({ text: e.text.replace(STEP_NUMBERING, "").trim() }));
+    }
+    // … sinon paragraphes sous un titre "Préparation"
+    if (steps.length < 2) {
+      steps = entries
+        .filter((e) => e.step && e.kind !== "heading" && e.kind !== "list" && e.text && e.text.length >= 20)
+        .map((e) => ({ text: e.text.replace(STEP_NUMBERING, "").trim() }));
+    }
+
+    if (ingredients.length < 2 || steps.length < 2) return null;
+
+    // 4. Portions et temps, dans le texte de la page
+    const text = normSpace(root.textContent);
+    const serv = /pour\s+(\d{1,2})(?:\s*(?:à|-|–)\s*\d{1,2})?\s*(?:personnes?|pers\b|parts?|portions?|gourmands?|convives?)/i.exec(text);
+    const timeAfter = (word) => {
+      const m = new RegExp(`${word}\\s*:?\\s*((?:\\d+\\s*(?:h|heures?|min(?:utes?)?|mn)\\s*)+)`, "i").exec(text);
+      return m ? parseDuration(m[1]) : null;
+    };
+    const prepTimeMin = timeAfter("pr[ée]paration");
+    const cookTimeMin = timeAfter("cuisson");
+
+    // Titre : le <h1> de la page, sinon le titre de l'onglet sans le nom du site ("… - Lady Coquillette")
+    const h1 = normSpace(doc.querySelector("h1")?.textContent);
+    const tabTitle = (meta.title || "").split(/\s+[-|–—·»]\s+/)[0];
+    return {
+      title: (h1 && h1.length <= 120 ? h1 : tabTitle) || "Recette sans titre",
+      description: meta.description ? meta.description.slice(0, 300) : undefined,
+      image: meta.image,
+      sourceUrl, siteName: meta.siteName,
+      servings: serv ? Number(serv[1]) : null,
+      yieldText: serv ? normSpace(serv[0]) : undefined,
+      prepTimeMin, cookTimeMin,
+      totalTimeMin: totalOf(prepTimeMin, cookTimeMin, null),
+      ingredients,
+      steps: steps.filter((s, i, arr) => s.text && (i === 0 || s.text !== arr[i - 1].text)),
+      extractedVia: "html",
+      extractedAt: new Date().toISOString(),
+    };
+  }
+
   // ── Réponse IA → recette (validation défensive) ────────────────
   const asNum = (v) => (v == null || v === "" ? null : Number.isFinite(Number(v)) ? Number(v) : parseDuration(v));
   const asStr = (v) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
@@ -389,7 +608,7 @@
     };
   }
 
-  function mergeRecipes(base, ai) {
+  function mergeRecipes(base, ai, via = "llm") {
     return {
       ...base,
       ingredients: base.ingredients.length ? base.ingredients : ai.ingredients,
@@ -400,7 +619,7 @@
       cookTimeMin: base.cookTimeMin ?? ai.cookTimeMin,
       totalTimeMin: base.totalTimeMin ?? ai.totalTimeMin,
       description: base.description ?? ai.description,
-      extractedVia: "llm",
+      extractedVia: via,
     };
   }
 
@@ -451,9 +670,16 @@
     const doc = new DOMParser().parseFromString(html, "text/html"); // DOMParser n'exécute aucun script
     const meta = getPageMeta(doc, sourceUrl);
     const candidates = findJsonLdRecipes(doc);
-    const recipe = candidates.length ? jsonLdToRecipe(pickBestCandidate(candidates), sourceUrl, meta) : null;
-    const complete = !!recipe && recipe.ingredients.length > 0 && recipe.steps.length > 0;
-    return { recipe, complete, meta, getText: () => extractMainText(doc) };
+    let recipe = candidates.length ? jsonLdToRecipe(pickBestCandidate(candidates), sourceUrl, meta) : null;
+    const isComplete = (r) => !!r && r.ingredients.length > 0 && r.steps.length > 0;
+
+    // Pas de JSON-LD exploitable : lecture du texte libre, toujours sans IA
+    if (!isComplete(recipe)) {
+      let found = null;
+      try { found = extractHeuristic(doc, sourceUrl, meta); } catch (err) { console.warn("lecture texte libre", err); }
+      if (found) recipe = recipe ? mergeRecipes(recipe, found, "html") : found;
+    }
+    return { recipe, complete: isComplete(recipe), meta, getText: () => extractMainText(doc) };
   }
 
   async function extractRecipe(input) {

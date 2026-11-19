@@ -5,7 +5,7 @@
  * - Les recettes elles-mêmes sont dans IndexedDB (pas ici)
  * Changer VERSION à chaque mise en ligne d'une nouvelle version force le renouvellement du cache.
  */
-const VERSION = "zbc-v2";
+const VERSION = "zbc-v3";
 const IMAGE_CACHE = "zbc-images";
 const MAX_IMAGES = 200;
 const NETWORK_TIMEOUT_MS = 3500;
