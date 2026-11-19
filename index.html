@@ -92,7 +92,13 @@
   .mini-brand { font: 700 17px/1 var(--serif); letter-spacing: -0.01em; }
 
   /* ── Accueil ───────────────────────────────────── */
-  .hero { padding: 28px 0 22px; }
+  .hero { padding: 14px 0 22px; }
+  .hero-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  .hero-row .icon-btn { margin: -4px -10px 0 0; flex: none; }
+  .hero.compact .hero-row { align-items: center; }
+  .hero.compact .hero-row .icon-btn { margin-top: 0; }
+  .topbar .wrap:empty { min-height: 0; }
+
   .brand { margin: 0; font: 800 clamp(38px, 11vw, 54px)/0.95 var(--serif); letter-spacing: -0.03em; }
   .brand .strike { position: relative; color: var(--muted); font-weight: 500; font-style: italic; }
   .brand .strike::after {
@@ -299,6 +305,32 @@
     width: min(560px, calc(100% - 24px)); max-height: calc(100% - 40px); padding: 22px;
     border: 0; border-radius: 22px; background: var(--bg); color: var(--ink);
   }
+  dialog { overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .muted-inline { font-weight: 500; color: var(--muted); font-size: 14px; margin-left: 6px; }
+  .sites { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); overflow: hidden; }
+  .site { display: flex; align-items: center; gap: 12px; padding: 10px 12px; }
+  .site + .site { border-top: 1px solid var(--line); }
+  .site.off .site-info { opacity: 0.45; }
+  .site-info { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .site-info strong { font-size: 16px; }
+  .site-info small { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .link-btn { border: 0; background: none; color: var(--accent); font-size: 15px; font-weight: 600; padding: 8px 4px; }
+  .add-site { width: 100%; height: 48px; margin-top: 10px; font-size: 16px; }
+  .switch { position: relative; flex: none; width: 46px; height: 28px; }
+  .switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; z-index: 1; cursor: pointer; }
+  .switch .slider { position: absolute; inset: 0; border-radius: 999px; background: var(--line); transition: background 0.2s; }
+  .switch .slider::after { content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgb(0 0 0 / 0.25); transition: transform 0.2s; }
+  .switch input:checked + .slider { background: var(--accent); }
+  .switch input:checked + .slider::after { transform: translateX(18px); }
+  .switch input:focus-visible + .slider { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .site.editing { display: block; background: var(--bg); }
+  .site-form { display: flex; flex-direction: column; gap: 8px; }
+  .input.small { height: 46px; font-size: 16px; border-radius: 12px; }
+  .site-help { margin: 0 !important; font-size: 13px; }
+  .site-test { margin: 0 !important; font-size: 14px; color: var(--ink) !important; min-height: 1em; }
+  .site-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .btn.small { height: 42px; padding: 0 14px; font-size: 15px; border-radius: 12px; }
+  .btn.primary-sm { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
   dialog::backdrop { background: rgb(0 0 0 / 0.45); }
   dialog h2 { margin: 0 0 4px; font: 800 26px/1.1 var(--serif); }
   dialog .group { margin-top: 20px; }
@@ -328,6 +360,11 @@
       <p>Laissez vide si le relais n'exige pas de code, ou si le code est déjà prévu par l'appli.</p>
     </div>
     <div class="group">
+      <span class="field-label">Sites de recherche <small id="sites-count" class="muted-inline"></small></span>
+      <div id="sites-manager"></div>
+      <p>Les sites désactivés ne sont pas interrogés. Ces choix sont enregistrés sur cet appareil.</p>
+    </div>
+    <div class="group">
       <span class="field-label">Mon carnet</span>
       <div class="url-row">
         <button type="button" class="btn" id="btn-export" style="flex:1">Exporter</button>
@@ -351,7 +388,7 @@
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "1.8.0";
+const APP_VERSION = "1.9.0";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -576,10 +613,7 @@ function settingsButton() {
 }
 
 function renderHome() {
-  const toolbar = [
-    h("span", { class: "spacer" }),
-    settingsButton(),
-  ];
+  const toolbar = []; // pas de barre en haut de l'accueil : l'engrenage est à côté du titre
 
   const tabs = h("div", { class: "tabs", role: "tablist", "aria-label": "Sections" },
     h("button", { class: "tab", role: "tab", "aria-selected": String(state.tab === "recherche"), onclick: () => go("#/") }, "Chercher"),
@@ -591,7 +625,9 @@ function renderHome() {
   const compact = state.tab === "recherche" && (state.search.results.length > 0 || state.search.loading);
   const content = [
     h("section", { class: compact ? "hero compact" : "hero" },
-      h("h1", { class: "brand" }, "Zéro ", h("span", { class: "strike" }, "Blabla"), h("br"), h("span", { class: "accent" }, "Cuisine")),
+      h("div", { class: "hero-row" },
+        h("h1", { class: "brand" }, "Zéro ", h("span", { class: "strike" }, "Blabla"), h("br"), h("span", { class: "accent" }, "Cuisine")),
+        settingsButton()),
       h("p", { class: "tagline" }, "La recette. Rien que la recette."),
     ),
     tabs,
@@ -727,7 +763,7 @@ function renderSearchPanel() {
   if (S.loading && !S.results.length) {
     const done = S.sources.length;
     parts.push(h("div", { class: "search-status", id: "search-status", "aria-live": "polite" },
-      `Recherche sur ${ZBC.SEARCH_SITES.length} sites de recettes… ${done}/${ZBC.SEARCH_SITES.length}`,
+      `Recherche sur ${enabledSites().length} sites de recettes… ${done}/${enabledSites().length}`,
       done ? h("div", { class: "sources" }, sourcesText()) : null));
   }
   if (S.results.length) {
@@ -736,7 +772,7 @@ function renderSearchPanel() {
     parts.push(renderSearchControls());
     parts.push(h("ul", { class: "results", id: "results" }, visibleResults().map(resultCard)));
   } else if (!S.loading && !S.error) {
-    parts.push(h("p", { class: "hint" }, `Cherchez une recette sur ${ZBC.SEARCH_SITES.length} sites de cuisine (${ZBC.SEARCH_SITES.map((x) => x.name).join(", ")}). Comparez temps, difficulté et notes d'un coup d'œil, puis ouvrez-la en mode cuisine.`));
+    parts.push(h("p", { class: "hint" }, `Recherche sur ${enabledSites().length} sites de cuisine (liste dans les Réglages). Comparez temps, difficulté et notes d'un coup d'œil, puis ouvrez la recette en mode cuisine.`));
   }
   parts.push(h("p", { class: "version" }, `Zéro Blabla Cuisine · version ${APP_VERSION}`));
   return h("section", { "aria-label": "Chercher une recette" }, parts);
@@ -1179,6 +1215,108 @@ function renderRecipe(recipe, { saved }) {
   document.title = `${recipe.title} · Zéro Blabla Cuisine`;
 }
 
+/* ════════════ Réglages : sites de recherche ════════════ */
+const sitesUI = { editing: null, test: null };   // editing : id du site en cours de modification, ou "new"
+const enabledSites = () => ZBC.getSearchSites().filter((x) => x.enabled !== false);
+
+function renderSitesManager() {
+  const box = $("#sites-manager");
+  if (!box) return;
+  const list = ZBC.getSearchSites();
+  const on = list.filter((x) => x.enabled !== false).length;
+  $("#sites-count").textContent = `${on} activé${on > 1 ? "s" : ""} sur ${list.length}`;
+
+  const rows = list.map((site) => (sitesUI.editing === site.id ? siteEditor(site) : siteRow(site)));
+  if (sitesUI.editing === "new") rows.push(siteEditor(null));
+  box.replaceChildren(
+    h("ul", { class: "sites" }, rows),
+    sitesUI.editing !== "new" && h("button", { type: "button", class: "btn add-site", onclick: () => { sitesUI.editing = "new"; sitesUI.test = null; renderSitesManager(); } }, "+ Ajouter un site"),
+    h("button", { type: "button", class: "link-btn", onclick: () => {
+      if (!confirm("Revenir à la liste de sites d'origine ? Vos ajouts et modifications seront perdus.")) return;
+      ZBC.resetSearchSites(); sitesUI.editing = null; renderSitesManager(); toast("Liste d'origine rétablie");
+    } }, "Rétablir la liste d'origine"),
+  );
+}
+
+function updateSites(mutator) {
+  const list = ZBC.getSearchSites();
+  mutator(list);
+  ZBC.saveSearchSites(list);
+  renderSitesManager();
+}
+
+function siteRow(site) {
+  const toggle = h("input", { type: "checkbox", checked: site.enabled !== false, "aria-label": `Utiliser ${site.name}` });
+  toggle.addEventListener("change", () => updateSites((list) => {
+    const s = list.find((x) => x.id === site.id);
+    if (s) s.enabled = toggle.checked;
+  }));
+  return h("li", { class: `site${site.enabled === false ? " off" : ""}` },
+    h("label", { class: "switch" }, toggle, h("span", { class: "slider", "aria-hidden": "true" })),
+    h("div", { class: "site-info" }, h("strong", {}, site.name || site.host), h("small", {}, site.host)),
+    h("button", { type: "button", class: "link-btn", onclick: () => { sitesUI.editing = site.id; sitesUI.test = null; renderSitesManager(); } }, "Modifier"));
+}
+
+function siteEditor(site) {
+  const isNew = !site;
+  const name = h("input", { class: "input small", placeholder: "Nom (ex. Les recettes de Julie)", value: site ? site.name : "" });
+  const host = h("input", { class: "input small", placeholder: "Site (ex. www.recettesdejulie.fr)", value: site ? site.host : "", inputmode: "url", autocapitalize: "off", spellcheck: "false" });
+  const search = h("input", { class: "input small", placeholder: "Recherche avec {q} (facultatif)", value: site && site.urls ? site.urls[0] || "" : "", inputmode: "url", autocapitalize: "off", spellcheck: "false" });
+  [name, host, search].forEach((el) => el.addEventListener("keydown", (e) => { if (e.key === "Enter") e.preventDefault(); })); // ne ferme pas les Réglages
+  const testLine = h("p", { class: "site-test", "aria-live": "polite" }, sitesUI.test || "");
+
+  /** Site tel que saisi (null si incomplet). */
+  const read = () => {
+    const hostValue = ZBC.normalizeHost(host.value);
+    if (!hostValue || !hostValue.includes(".")) { testLine.textContent = "Indiquez l'adresse du site (ex. www.elle.fr)."; return null; }
+    const typed = search.value.trim();
+    if (typed && !/\{q\}/.test(typed)) { testLine.textContent = "L'adresse de recherche doit contenir {q} à la place des mots cherchés."; return null; }
+    const sameAsBefore = site && site.host === hostValue && (site.urls || [])[0] === typed;
+    return {
+      id: site ? site.id : `perso-${Date.now().toString(36)}`,
+      name: name.value.trim() || hostValue.replace(/^www\./, ""),
+      host: hostValue,
+      urls: typed ? [typed, ...(sameAsBefore ? (site.urls || []).slice(1) : [])] : [],
+      recipe: sameAsBefore ? site.recipe : undefined, // la forme connue des recettes ne vaut que pour l'adresse d'origine
+      enabled: site ? site.enabled !== false : true,
+    };
+  };
+
+  return h("li", { class: "site editing" },
+    h("div", { class: "site-form" },
+      h("strong", {}, isNew ? "Nouveau site" : `Modifier ${site.name}`),
+      name, host, search,
+      h("p", { class: "site-help" }, "Laissez l'adresse de recherche vide : l'appli essaiera les formats courants. Sinon, faites une recherche sur le site, copiez l'adresse obtenue et remplacez les mots cherchés par {q}."),
+      testLine,
+      h("div", { class: "site-actions" },
+        h("button", { type: "button", class: "btn small", onclick: async (e) => {
+          const s = read(); if (!s) return;
+          const btn = e.currentTarget; btn.disabled = true;
+          testLine.textContent = "Test en cours (recherche « gâteau au chocolat »)…";
+          try {
+            const r = await ZBC.testSearchSite(s);
+            sitesUI.test = r.count ? `✓ ${r.count} recette${r.count > 1 ? "s" : ""} trouvée${r.count > 1 ? "s" : ""}${r.sample ? ` (ex. « ${r.sample} »)` : ""}`
+              : r.error ? `✕ ${r.error}` : "✕ Aucune recette trouvée : essayez de préciser l'adresse de recherche.";
+          } catch (err) { sitesUI.test = `✕ ${err.message}`; }
+          testLine.textContent = sitesUI.test; btn.disabled = false;
+        } }, "Tester"),
+        h("button", { type: "button", class: "btn small primary-sm", onclick: () => {
+          const s = read(); if (!s) return;
+          updateSites((list) => {
+            const i = list.findIndex((x) => x.id === s.id);
+            if (i >= 0) list[i] = s; else list.push(s);
+          });
+          sitesUI.editing = null; sitesUI.test = null; renderSitesManager(); toast(isNew ? "Site ajouté" : "Site modifié");
+        } }, "Enregistrer"),
+        !isNew && h("button", { type: "button", class: "btn small danger", onclick: () => {
+          if (!confirm(`Retirer ${site.name} de la recherche ?`)) return;
+          sitesUI.editing = null; updateSites((list) => { const i = list.findIndex((x) => x.id === site.id); if (i >= 0) list.splice(i, 1); }); toast("Site retiré");
+        } }, "Supprimer"),
+        h("button", { type: "button", class: "btn small ghost", onclick: () => { sitesUI.editing = null; sitesUI.test = null; renderSitesManager(); } }, "Annuler"),
+      ),
+    ));
+}
+
 /* ════════════ Réglages ════════════ */
 function openSettings() {
   let worker = "", code = "";
@@ -1187,6 +1325,8 @@ function openSettings() {
   $("#set-worker").placeholder = ZBC.getWorkerUrl() || "https://zbc-relais.….workers.dev";
   $("#set-code").value = code;
   $("#settings-version").textContent = `Zéro Blabla Cuisine · version ${APP_VERSION}`;
+  sitesUI.editing = null; sitesUI.test = null;
+  renderSitesManager();
   const dlg = $("#settings");
   if (typeof dlg.showModal === "function") dlg.showModal();
 }

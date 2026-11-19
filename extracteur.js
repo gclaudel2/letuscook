@@ -833,21 +833,64 @@
    * exacte de ses adresses de recettes ; sans lui, les liens sont reconnus automatiquement.
    */
   const enc = encodeURIComponent;
-  const wp = (host) => (q) => `https://${host}/?s=${enc(q)}`; // recherche WordPress standard
-  const SEARCH_SITES = [
-    { name: "Marmiton", host: "www.marmiton.org", url: [(q) => `https://www.marmiton.org/recettes/recherche.aspx?aqt=${enc(q)}`], recipe: /^\/recettes\/recette_[\w-]+\.aspx$/i },
-    { name: "Elle à table", host: "www.elle.fr", url: [(q) => `https://www.elle.fr/Recherche?q=${enc(q)}`, (q) => `https://www.elle.fr/recherche?q=${enc(q)}`], recipe: /^\/Elle-a-Table\/Recettes-de-cuisine\/[\w-]+-\d+$/i },
-    { name: "Cuisine Actuelle", host: "www.cuisineactuelle.fr", url: [(q) => `https://www.cuisineactuelle.fr/recherche?q=${enc(q)}`, (q) => `https://www.cuisineactuelle.fr/recherche?search=${enc(q)}`], recipe: /^\/recettes\/[\w-]+-\d+$/i },
-    { name: "750g", host: "www.750g.com", url: [(q) => `https://www.750g.com/recherche/?q=${enc(q)}`], recipe: /^\/[\w-]+-r\d+\.htm$/i },
-    { name: "Journal des Femmes", host: "cuisine.journaldesfemmes.fr", url: [(q) => `https://cuisine.journaldesfemmes.fr/s/?f_libelle=${enc(q)}`], recipe: /^\/recette\/\d+-[\w-]+$/i },
-    { name: "Cuisine AZ", host: "www.cuisineaz.com", url: [(q) => `https://www.cuisineaz.com/recettes/recherche_terme.aspx?recherche=${enc(q)}`], recipe: /^\/recettes\/[\w-]+-\d+\.aspx$/i },
-    { name: "Ricardo", host: "www.ricardocuisine.com", url: [(q) => `https://www.ricardocuisine.com/recherche?searchValue=${enc(q)}`], recipe: /^\/recettes\/\d+-[\w-]+$/i },
-    { name: "Papilles et Pupilles", host: "www.papillesetpupilles.fr", url: [wp("www.papillesetpupilles.fr")], recipe: /^\/\d{4}\/\d{2}\/[\w-]+\.html\/?$/i },
-    { name: "Chef Simon", host: "chefsimon.com", url: [(q) => `https://chefsimon.com/recherche?q=${enc(q)}`, (q) => `https://chefsimon.com/search?q=${enc(q)}`] },
-    { name: "Hervé Cuisine", host: "www.hervecuisine.com", url: [wp("www.hervecuisine.com")] },
-    { name: "Il était une fois la pâtisserie", host: "www.iletaitunefoislapatisserie.com", url: [wp("www.iletaitunefoislapatisserie.com")] },
-    { name: "Ptitchef", host: "www.ptitchef.com", url: [(q) => `https://www.ptitchef.com/recettes/recherche?q=${enc(q)}`, (q) => `https://www.ptitchef.com/recherche?q=${enc(q)}`] },
+  /*
+   * Liste d'origine. L'utilisateur peut la modifier dans les Réglages (enregistrée sur l'appareil).
+   * urls : adresses de recherche, {q} = mots cherchés (essayées dans l'ordre).
+   * recipe : forme exacte des adresses de recettes (facultatif ; sinon reconnaissance automatique).
+   */
+  const DEFAULT_SEARCH_SITES = [
+    { id: "marmiton", name: "Marmiton", host: "www.marmiton.org", urls: ["https://www.marmiton.org/recettes/recherche.aspx?aqt={q}"], recipe: "^/recettes/recette_[\\w-]+\\.aspx$" },
+    { id: "elle", name: "Elle à table", host: "www.elle.fr", urls: ["https://www.elle.fr/Recherche?q={q}", "https://www.elle.fr/recherche?q={q}"], recipe: "^/Elle-a-Table/Recettes-de-cuisine/[\\w-]+-\\d+$" },
+    { id: "cuisineactuelle", name: "Cuisine Actuelle", host: "www.cuisineactuelle.fr", urls: ["https://www.cuisineactuelle.fr/recherche?q={q}", "https://www.cuisineactuelle.fr/recherche?search={q}"], recipe: "^/recettes/[\\w-]+-\\d+$" },
+    { id: "750g", name: "750g", host: "www.750g.com", urls: ["https://www.750g.com/recherche/?q={q}"], recipe: "^/[\\w-]+-r\\d+\\.htm$" },
+    { id: "jdf", name: "Journal des Femmes", host: "cuisine.journaldesfemmes.fr", urls: ["https://cuisine.journaldesfemmes.fr/s/?f_libelle={q}"], recipe: "^/recette/\\d+-[\\w-]+$" },
+    { id: "cuisineaz", name: "Cuisine AZ", host: "www.cuisineaz.com", urls: ["https://www.cuisineaz.com/recettes/recherche_terme.aspx?recherche={q}"], recipe: "^/recettes/[\\w-]+-\\d+\\.aspx$" },
+    { id: "ricardo", name: "Ricardo", host: "www.ricardocuisine.com", urls: ["https://www.ricardocuisine.com/recherche?searchValue={q}"], recipe: "^/recettes/\\d+-[\\w-]+$" },
+    { id: "papilles", name: "Papilles et Pupilles", host: "www.papillesetpupilles.fr", urls: ["https://www.papillesetpupilles.fr/?s={q}"], recipe: "^/\\d{4}/\\d{2}/[\\w-]+\\.html/?$" },
+    { id: "chefsimon", name: "Chef Simon", host: "chefsimon.com", urls: ["https://chefsimon.com/recherche?q={q}", "https://chefsimon.com/search?q={q}"] },
+    { id: "herve", name: "Hervé Cuisine", host: "www.hervecuisine.com", urls: ["https://www.hervecuisine.com/?s={q}"] },
+    { id: "ietflp", name: "Il était une fois la pâtisserie", host: "www.iletaitunefoislapatisserie.com", urls: ["https://www.iletaitunefoislapatisserie.com/?s={q}"] },
+    { id: "ptitchef", name: "Ptitchef", host: "www.ptitchef.com", urls: ["https://www.ptitchef.com/recettes/recherche?q={q}", "https://www.ptitchef.com/recherche?q={q}"] },
   ];
+  const SITES_KEY = "zbc.sites";
+
+  /** "https://www.Elle.fr/Elle-a-Table" ou "elle.fr" → "www.elle.fr" / "elle.fr" */
+  function normalizeHost(input) {
+    const t = String(input || "").trim();
+    if (!t) return "";
+    try { return new URL(/^https?:\/\//i.test(t) ? t : `https://${t}`).hostname.toLowerCase(); } catch { return ""; }
+  }
+  /** Sans adresse de recherche connue : formats les plus courants (WordPress, puis /recherche, /search). */
+  function guessSearchUrls(host) {
+    return [`https://${host}/?s={q}`, `https://${host}/recherche?q={q}`, `https://${host}/search?q={q}`];
+  }
+  /** Liste de l'utilisateur (Réglages), sinon liste d'origine. */
+  function getSearchSites() {
+    try {
+      const stored = JSON.parse(localStorage.getItem(SITES_KEY) || "null");
+      if (Array.isArray(stored)) return stored.filter((x) => x && x.host);
+    } catch { /* liste illisible : on repart de l'origine */ }
+    return DEFAULT_SEARCH_SITES.map((x) => ({ ...x, enabled: true }));
+  }
+  function saveSearchSites(list) {
+    try { localStorage.setItem(SITES_KEY, JSON.stringify(list)); } catch { /* stockage indisponible */ }
+  }
+  function resetSearchSites() {
+    try { localStorage.removeItem(SITES_KEY); } catch { /* */ }
+  }
+  /** Prépare un site pour la recherche (adresses → fonctions, forme des recettes → RegExp). */
+  function compileSite(raw) {
+    let recipe = null;
+    if (raw.recipe) { try { recipe = new RegExp(raw.recipe, "i"); } catch { recipe = null; } }
+    const templates = (raw.urls || []).filter((t) => /\{q\}/.test(t));
+    return {
+      name: raw.name || raw.host,
+      host: raw.host,
+      recipe,
+      url: (templates.length ? templates : guessSearchUrls(raw.host)).map((t) => (q) => t.split("{q}").join(enc(q))),
+    };
+  }
+  const activeSites = () => getSearchSites().filter((x) => x.enabled !== false).map(compileSite);
   const PER_SITE = 3;
   const MAX_RESULTS = 15;
 
@@ -982,7 +1025,9 @@
     const query = normSpace(q);
     if (query.length < 2) throw new ExtractError("INVALID_QUERY", "Tapez au moins 2 lettres.");
     const words = queryWords(query);
-    const perSite = await Promise.all(SEARCH_SITES.map(async (site) => {
+    const sites = activeSites();
+    if (!sites.length) throw new ExtractError("NO_SITES", "Aucun site de recherche activé : choisissez-en dans les Réglages.");
+    const perSite = await Promise.all(sites.map(async (site) => {
       const { links, error } = await searchOneSite(site, query, words);
       onSite(site.name, links.length, error);
       return links;
@@ -998,6 +1043,13 @@
     return results;
   }
 
+  /** Teste un site (Réglages) : nombre de recettes trouvées pour une recherche d'essai. */
+  async function testSearchSite(raw, q = "gâteau au chocolat") {
+    const site = compileSite(raw);
+    const { links, error } = await searchOneSite(site, q, queryWords(q));
+    return { count: links.length, error, sample: links[0] ? links[0].title : "" };
+  }
+
   /** Récupère et analyse une page SANS IA (pour les fiches de résultats). */
   async function analyzeUrl(url) {
     const page = await callWorker("/page", { url });
@@ -1008,7 +1060,7 @@
 
   window.ZBC = {
     CONFIG, ACCESS_CODE_KEY, WORKER_URL_KEY, getWorkerUrl, ExtractError,
-    extractRecipe, extractFromHtml, parseTargetUrl, searchRecipes, analyzeUrl, SEARCH_SITES,
+    extractRecipe, extractFromHtml, parseTargetUrl, searchRecipes, analyzeUrl, getSearchSites, saveSearchSites, resetSearchSites, normalizeHost, testSearchSite, DEFAULT_SEARCH_SITES,
     parseIngredient, formatIngredient, formatQuantity, parseDuration, parseServings,
   };
 })();
