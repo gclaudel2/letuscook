@@ -291,6 +291,32 @@
   .shimmer.short { width: 55%; }
   @keyframes shimmer { to { background-position: -200% 0; } }
 
+  /* ── Barre mains libres ───────────────────────── */
+  body.has-cookbar { padding-bottom: calc(96px + var(--safe-bottom)); }
+  .cook-bar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+    display: flex; align-items: center; gap: 6px;
+    padding: 8px max(10px, env(safe-area-inset-left)) calc(8px + var(--safe-bottom));
+    background: color-mix(in srgb, var(--surface) 94%, transparent);
+    -webkit-backdrop-filter: saturate(1.4) blur(14px); backdrop-filter: saturate(1.4) blur(14px);
+    border-top: 1px solid var(--line);
+  }
+  .cook-bar.flash { animation: barflash 0.5s ease-out; }
+  @keyframes barflash { from { background: var(--accent-soft); } }
+  .nav-btn { flex: none; width: 54px; height: 54px; border-radius: 50%; border: 0; background: var(--line); color: var(--ink); display: grid; place-items: center; }
+  .nav-btn svg { width: 28px; height: 28px; }
+  .nav-btn.primary { background: var(--accent); color: var(--accent-ink); }
+  .nav-btn:disabled { opacity: 0.35; }
+  .bar-center { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 1px; }
+  .bar-center strong { font: 800 17px/1.2 var(--rounded); font-variant-numeric: tabular-nums; }
+  .bar-center small { font-size: 12px; color: var(--muted); line-height: 1.2; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .motion-meter { display: block; width: 60%; height: 3px; border-radius: 2px; background: var(--line); overflow: hidden; margin-top: 3px; }
+  .motion-meter span { display: block; height: 100%; background: var(--accent); transform-origin: left; transform: scaleX(0); transition: transform 0.07s linear; }
+  .hf-btn { flex: none; width: 40px; height: 40px; border-radius: 50%; border: 1.5px solid var(--line); background: transparent; color: var(--muted); display: grid; place-items: center; padding: 0; overflow: hidden; }
+  .hf-btn svg { width: 20px; height: 20px; }
+  .hf-btn.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .hf-btn .cam-preview { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+
   /* ── Divers ────────────────────────────────────── */
   .toast {
     position: fixed; left: 50%; bottom: calc(24px + var(--safe-bottom)); z-index: 50;
@@ -300,6 +326,7 @@
     transition: opacity 0.2s, transform 0.2s;
   }
   .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  body.has-cookbar .toast { bottom: calc(96px + var(--safe-bottom)); }
 
   dialog {
     width: min(560px, calc(100% - 24px)); max-height: calc(100% - 40px); padding: 22px;
@@ -360,6 +387,15 @@
       <p>Laissez vide si le relais n'exige pas de code, ou si le code est déjà prévu par l'appli.</p>
     </div>
     <div class="group">
+      <label class="field-label" for="set-gesture">Sensibilité du geste de la main</label>
+      <select class="input" id="set-gesture">
+        <option value="faible">Faible : main très proche de l'écran</option>
+        <option value="normale">Normale</option>
+        <option value="forte">Forte : réagit aux gestes plus lointains</option>
+      </select>
+      <p>Si l'étape avance toute seule quand vous bougez dans la cuisine, choisissez « Faible ».</p>
+    </div>
+    <div class="group">
       <span class="field-label">Sites de recherche <small id="sites-count" class="muted-inline"></small></span>
       <div id="sites-manager"></div>
       <p>Les sites désactivés ne sont pas interrogés. Ces choix sont enregistrés sur cet appareil.</p>
@@ -388,7 +424,7 @@
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "1.9.0";
+const APP_VERSION = "2.0.0";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -424,6 +460,11 @@ const ICONS = {
   star: "M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z",
   search: "M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.35-4.35",
   list: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01",
+  mic: "M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3zM19 10v2a7 7 0 0 1-14 0v-2M12 19v3",
+  hand: "M18 11V6a2 2 0 0 0-4 0v5M14 10V4a2 2 0 0 0-4 0v6M10 10.5V6a2 2 0 0 0-4 0v8a8 8 0 0 0 16 0v-3a2 2 0 0 0-4 0",
+  volume: "M11 5L6 9H2v6h4l5 4V5zM15.54 8.46a5 5 0 0 1 0 7.07M19.07 4.93a10 10 0 0 1 0 14.14",
+  next: "M9 18l6-6-6-6",
+  prev: "M15 18l-6-6 6-6",
 };
 function icon(name, filled = false) {
   const svg = document.createElementNS(SVG_NS, "svg");
@@ -540,14 +581,14 @@ const Wake = {
   supported: "wakeLock" in navigator,
   wanted: false,
   sentinel: null,
-  async enable() {
+  async enable(silent = false) {
     this.wanted = true;
     try {
       this.sentinel = await navigator.wakeLock.request("screen");
       this.sentinel.addEventListener("release", () => { this.sentinel = null; refreshWakeButton(); });
     } catch (err) {
       this.wanted = false;
-      toast("L'écran ne peut pas rester allumé ici.");
+      if (!silent) toast("L'écran ne peut pas rester allumé ici.");
       console.warn(err);
     }
     refreshWakeButton();
@@ -574,6 +615,258 @@ function refreshWakeButton() {
   btn.setAttribute("aria-label", on ? "Écran maintenu allumé (toucher pour désactiver)" : "Garder l'écran allumé");
 }
 
+/* ════════════ Mains libres : voix, geste, lecture ════════════ */
+/*
+ * Le mode cuisine fournit un "contexte" (attach) : aller à l'étape suivante, précédente, n°…
+ * - Voix : reconnaissance vocale de l'iPhone (fr-FR), relancée en boucle tant qu'elle est active.
+ * - Geste : caméra frontale en très basse résolution ; une main qui passe devant l'écran
+ *   = étape suivante. Tout est analysé sur l'iPhone, aucune image n'est envoyée.
+ * - Lecture : l'étape en cours est lue à voix haute (synthèse vocale).
+ */
+const foldText = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/['’\-]/g, " ").replace(/\s+/g, " ").trim();
+const NUM_WORDS = { un: 1, une: 1, premiere: 1, deux: 2, trois: 3, quatre: 4, cinq: 5, six: 6, sept: 7, huit: 8, neuf: 9, dix: 10, onze: 11, douze: 12, treize: 13, quatorze: 14, quinze: 15, seize: 16, "dix sept": 17, "dix huit": 18, "dix neuf": 19, vingt: 20 };
+
+/** Texte reconnu → commande. */
+function parseVoiceCommand(raw) {
+  const t = ` ${foldText(raw)} `;
+  const m = /\betape (\d{1,2}|dix (?:sept|huit|neuf)|[a-z]+)\b/.exec(t);
+  if (m) {
+    const n = /^\d+$/.test(m[1]) ? Number(m[1]) : NUM_WORDS[m[1]];
+    if (n) return { type: "goto", n };
+  }
+  if (/ (precedent|precedente|retour|reviens|revenir|en arriere|recule) /.test(t)) return { type: "prev" };
+  if (/ (suivant|suivante|apres|ensuite|continue|continuer|next|c est fait|fait|termine|avance) /.test(t)) return { type: "next" };
+  if (/ (repete|repeter|relis|relire|encore|redis|quoi) /.test(t)) return { type: "repeat" };
+  if (/ (ingredient|ingredients) /.test(t)) return { type: "ingredients" };
+  if (/ (stop|arrete|silence|chut|tais toi) /.test(t)) return { type: "stop" };
+  return null;
+}
+
+/** Détecteur de passage de main : reçoit le taux de mouvement (0–1) image après image. */
+function createWaveDetector() {
+  let burstStart = 0, cooldownUntil = 0, needCalm = false;
+  return {
+    reset() { burstStart = 0; cooldownUntil = 0; needCalm = false; },
+    /** threshold : part de l'image qui doit bouger (main proche = beaucoup ; personne au loin = peu) */
+    feed(motion, now, threshold) {
+      // Après un mouvement trop long (quelqu'un qui s'affaire devant l'écran), on attend le calme
+      if (needCalm) { if (motion < threshold * 0.5) needCalm = false; return false; }
+      if (now < cooldownUntil) return false;
+      if (motion >= threshold) {
+        if (!burstStart) burstStart = now;
+        if (now - burstStart > 1500) { burstStart = 0; needCalm = true; } // mouvement continu : on ignore
+        return false;
+      }
+      if (burstStart && motion < threshold * 0.5) {
+        const dur = now - burstStart;
+        burstStart = 0;
+        if (dur >= 50 && dur <= 1300) { cooldownUntil = now + 1400; return true; }
+      }
+      return false;
+    },
+  };
+}
+
+/** Part de l'image qui a changé (luminosité moyenne neutralisée : l'exposition auto ne compte pas). */
+function motionBetween(gray, prev) {
+  let a = 0, b = 0;
+  for (let i = 0; i < gray.length; i++) { a += gray[i]; b += prev[i]; }
+  a /= gray.length; b /= prev.length;
+  let changed = 0;
+  for (let i = 0; i < gray.length; i++) if (Math.abs((gray[i] - a) - (prev[i] - b)) > 28) changed++;
+  return changed / gray.length;
+}
+
+const GESTURE_LEVELS = { faible: 0.38, normale: 0.26, forte: 0.16 };
+
+const HandsFree = {
+  ctx: null,                       // fourni par le mode cuisine
+  voiceOn: false, gestureOn: false, readOn: false,
+  rec: null, restartTimer: 0, speaking: false, lastCmdAt: 0, lastCmdKey: "",
+  stream: null, video: null, timer: 0, prevGray: null, detector: createWaveDetector(),
+  audio: null,
+  status: "",
+
+  get voiceSupported() { return !!(window.SpeechRecognition || window.webkitSpeechRecognition); },
+  get gestureSupported() { return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia); },
+  get readSupported() { return "speechSynthesis" in window; },
+
+  attach(ctx) {
+    this.ctx = ctx;
+    // Après un changement d'écran, iOS coupe parfois la caméra : on la relance si elle était active
+    if (this.gestureOn && (!this.stream || this.stream.getVideoTracks().every((t) => t.readyState === "ended"))) this.startGesture(true);
+    this.refresh();
+  },
+  detach() {
+    this.stopVoice(); this.stopGesture(); this.stopReading();
+    this.readOn = false; this.ctx = null;
+  },
+
+  /* ── retours visuels et sonores ── */
+  setStatus(text) { this.status = text; this.refresh(); },
+  refresh() { if (this.ctx && this.ctx.refreshBar) this.ctx.refreshBar(); },
+  beep(freq = 880) {
+    try {
+      this.audio = this.audio || new (window.AudioContext || window.webkitAudioContext)();
+      const o = this.audio.createOscillator(), g = this.audio.createGain();
+      o.frequency.value = freq; g.gain.value = 0.06;
+      o.connect(g); g.connect(this.audio.destination);
+      o.start(); o.stop(this.audio.currentTime + 0.09);
+    } catch { /* son facultatif */ }
+  },
+  flash() { const bar = document.getElementById("cook-bar"); if (bar) { bar.classList.remove("flash"); void bar.offsetWidth; bar.classList.add("flash"); } },
+
+  /* ── commandes ── */
+  run(cmd, source) {
+    if (!this.ctx || !cmd) return;
+    const now = Date.now();
+    const key = cmd.type + (cmd.n || "");
+    if (key === this.lastCmdKey && now - this.lastCmdAt < 900) return; // même phrase reconnue deux fois
+    this.lastCmdAt = now; this.lastCmdKey = key;
+    if (cmd.type === "next") this.ctx.next();
+    else if (cmd.type === "prev") this.ctx.prev();
+    else if (cmd.type === "goto") this.ctx.goto(cmd.n - 1);
+    else if (cmd.type === "repeat") this.speak(this.ctx.currentText(), true);
+    else if (cmd.type === "ingredients") this.speak(this.ctx.ingredientsText(), true);
+    else if (cmd.type === "stop") this.stopReading();
+    this.beep(cmd.type === "prev" ? 660 : 880);
+    this.flash();
+    if (source) this.setStatus(source);
+  },
+  handleSpeech(alternatives) {
+    for (const alt of alternatives) {
+      const cmd = parseVoiceCommand(alt);
+      if (cmd) { this.run(cmd, `« ${alt.trim()} »`); return true; }
+    }
+    if (alternatives[0]) this.setStatus(`« ${alternatives[0].trim()} » ? Dites « suivant » ou « précédent »`);
+    return false;
+  },
+
+  /* ── voix ── */
+  startVoice() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { toast("La reconnaissance vocale n'est pas disponible sur cet appareil."); return false; }
+    this.voiceOn = true;
+    const rec = new SR();
+    rec.lang = "fr-FR";
+    rec.continuous = false;          // plus fiable sur iPhone : une phrase, puis on relance
+    rec.interimResults = false;
+    rec.maxAlternatives = 3;
+    rec.onresult = (e) => {
+      const res = e.results[e.results.length - 1];
+      this.handleSpeech([...res].map((a) => a.transcript));
+    };
+    rec.onerror = (e) => {
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+        this.stopVoice();
+        toast("Micro ou reconnaissance vocale refusés. Vérifiez Réglages iPhone › Safari › Micro, et que la Dictée est activée.");
+      } else if (e.error === "network") {
+        this.setStatus("Reconnaissance vocale : réseau indisponible");
+      }
+    };
+    rec.onend = () => { if (this.voiceOn && !this.speaking) this.restartTimer = setTimeout(() => this.listen(), 250); };
+    this.rec = rec;
+    this.listen();
+    this.setStatus("J'écoute : « suivant », « précédent », « répète »…");
+    return true;
+  },
+  listen() { if (this.voiceOn && this.rec && !this.speaking) { try { this.rec.start(); } catch { /* déjà en cours */ } } },
+  stopVoice() {
+    this.voiceOn = false;
+    clearTimeout(this.restartTimer);
+    if (this.rec) { try { this.rec.onend = null; this.rec.abort(); } catch { /* */ } }
+    this.rec = null;
+    this.refresh();
+  },
+
+  /* ── lecture à voix haute ── */
+  speak(text, force = false) {
+    if (!text || !this.readSupported || (!this.readOn && !force)) return;
+    try {
+      speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = "fr-FR";
+      const fr = speechSynthesis.getVoices().find((v) => /^fr[-_]FR/i.test(v.lang)) || speechSynthesis.getVoices().find((v) => /^fr/i.test(v.lang));
+      if (fr) u.voice = fr;
+      // Le micro est coupé pendant la lecture, sinon l'appli s'écouterait elle-même
+      this.speaking = true;
+      if (this.rec) { try { this.rec.abort(); } catch { /* */ } }
+      const done = () => { this.speaking = false; if (this.voiceOn) this.restartTimer = setTimeout(() => this.listen(), 300); };
+      u.onend = done; u.onerror = done;
+      speechSynthesis.speak(u);
+    } catch { this.speaking = false; }
+  },
+  stopReading() { this.speaking = false; try { speechSynthesis.cancel(); } catch { /* */ } if (this.voiceOn) this.listen(); },
+  toggleRead() {
+    if (!this.readSupported) { toast("La lecture à voix haute n'est pas disponible sur cet appareil."); return; }
+    this.readOn = !this.readOn;
+    if (this.readOn) this.speak(this.ctx ? this.ctx.currentText() || "Lecture des étapes activée." : "", true);
+    else this.stopReading();
+    this.refresh();
+  },
+
+  /* ── geste (caméra) ── */
+  async startGesture(silent = false) {
+    if (!this.gestureSupported) { toast("La caméra n'est pas disponible ici."); return false; }
+    this.stopGesture(true);
+    this.gestureOn = true;
+    this.refresh();
+    try {
+      this.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 320 }, height: { ideal: 240 } }, audio: false });
+    } catch (err) {
+      this.gestureOn = false;
+      this.refresh();
+      if (!silent) toast(err && err.name === "NotAllowedError" ? "Caméra refusée : autorisez-la pour utiliser le geste." : "Impossible d'ouvrir la caméra.");
+      return false;
+    }
+    const video = this.video || document.createElement("video");
+    video.muted = true; video.playsInline = true; video.setAttribute("playsinline", ""); video.autoplay = true;
+    video.srcObject = this.stream;
+    this.video = video;
+    this.refresh(); // place l'aperçu dans la barre
+    try { await video.play(); } catch { /* iOS lance la lecture tout seul */ }
+
+    const W = 40, H = 30;
+    const canvas = document.createElement("canvas");
+    canvas.width = W; canvas.height = H;
+    const c2d = canvas.getContext("2d", { willReadFrequently: true });
+    const level = () => GESTURE_LEVELS[store.get("zbc.gestureLevel", "normale")] || GESTURE_LEVELS.normale;
+    this.prevGray = null;
+    this.detector.reset();
+    this.timer = setInterval(() => {
+      if (!this.gestureOn || video.readyState < 2 || document.hidden) return;
+      c2d.drawImage(video, 0, 0, W, H);
+      const px = c2d.getImageData(0, 0, W, H).data;
+      const gray = new Float32Array(W * H);
+      for (let i = 0, j = 0; i < px.length; i += 4, j++) gray[j] = px[i] * 0.3 + px[i + 1] * 0.59 + px[i + 2] * 0.11;
+      if (this.prevGray) {
+        const m = motionBetween(gray, this.prevGray);
+        const meter = document.getElementById("motion-meter");
+        if (meter) meter.style.transform = `scaleX(${Math.min(1, m / level())})`;
+        if (this.detector.feed(m, performance.now(), level())) this.run({ type: "next" }, "✋ geste détecté");
+      }
+      this.prevGray = gray;
+    }, 70);
+    if (!silent) this.setStatus("Passez la main devant l'écran pour avancer");
+    return true;
+  },
+  stopGesture(keepFlag = false) {
+    clearInterval(this.timer); this.timer = 0;
+    if (this.stream) this.stream.getTracks().forEach((t) => t.stop());
+    this.stream = null;
+    if (this.video) this.video.srcObject = null;
+    if (!keepFlag) this.gestureOn = false;
+    this.refresh();
+  },
+};
+
+// Retour dans l'appli : iOS a pu couper micro et caméra
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible" || !HandsFree.ctx) return;
+  if (HandsFree.voiceOn) HandsFree.listen();
+  if (HandsFree.gestureOn && (!HandsFree.stream || HandsFree.stream.getVideoTracks().every((t) => t.readyState === "ended"))) HandsFree.startGesture(true);
+});
+
 /* ════════════ Navigation ════════════ */
 function go(hash, replace = false) {
   if (replace) history.replaceState(null, "", hash);
@@ -584,7 +877,11 @@ function go(hash, replace = false) {
 function route() {
   const hash = location.hash || "#/";
   const m = /^#\/r\/(.+)$/.exec(hash);
-  if (!m && hash !== "#/apercu" && Wake.wanted) Wake.disable(); // on quitte le mode cuisine
+  if (!m && hash !== "#/apercu") { // on quitte le mode cuisine
+    if (Wake.wanted) Wake.disable();
+    HandsFree.detach();
+    document.body.classList.remove("has-cookbar");
+  }
   if (m) {
     const recipe = state.recipes.find((r) => r.id === decodeURIComponent(m[1]));
     return recipe ? renderRecipe(recipe, { saved: true }) : go("#/carnet", true);
@@ -1174,6 +1471,51 @@ function renderRecipe(recipe, { saved }) {
     });
     persist();
     if (scroll && i >= 0) stepButtons[i].scrollIntoView({ behavior: "smooth", block: "center" });
+    refreshBar();
+    if (scroll && i >= 0) HandsFree.speak(stepSpeech(i));
+  }
+
+  /* Barre mains libres (en bas de l'écran) */
+  const stepSpeech = (i) => (recipe.steps[i] ? `Étape ${i + 1}. ${recipe.steps[i].text}` : "");
+  const goStep = (i) => {
+    if (!recipe.steps.length) return;
+    if (i >= recipe.steps.length) { toast("C'était la dernière étape. Bon appétit !"); HandsFree.speak("C'était la dernière étape. Bon appétit !"); return; }
+    setActive(Math.max(0, i));
+  };
+  const barLabel = h("strong", {});
+  const barStatus = h("small", {});
+  const barPrev = h("button", { class: "nav-btn", type: "button", "aria-label": "Étape précédente", onclick: () => goStep(activeStep - 1) }, icon("prev"));
+  const barNext = h("button", { class: "nav-btn primary", type: "button", "aria-label": "Étape suivante", onclick: () => goStep(activeStep + 1) }, icon("next"));
+  const micBtn = h("button", { class: "hf-btn", type: "button", "aria-label": "Commande vocale", onclick: () => {
+    if (HandsFree.voiceOn) { HandsFree.stopVoice(); HandsFree.setStatus(""); }
+    else if (HandsFree.startVoice() && !Wake.wanted && Wake.supported) Wake.enable(true);
+  } }, icon("mic"));
+  const handBtn = h("button", { class: "hf-btn", type: "button", "aria-label": "Geste de la main (caméra)", onclick: async () => {
+    if (HandsFree.gestureOn) { HandsFree.stopGesture(); HandsFree.setStatus(""); }
+    else if (await HandsFree.startGesture() && !Wake.wanted && Wake.supported) Wake.enable(true);
+  } }, icon("hand"));
+  const readBtn = h("button", { class: "hf-btn", type: "button", "aria-label": "Lire les étapes à voix haute", onclick: () => HandsFree.toggleRead() }, icon("volume"));
+  const meter = h("span", { class: "motion-meter", "aria-hidden": "true" }, h("span", { id: "motion-meter" }));
+  const cookBar = h("div", { class: "cook-bar", id: "cook-bar", role: "toolbar", "aria-label": "Navigation dans les étapes" },
+    barPrev,
+    h("div", { class: "bar-center", "aria-live": "polite" }, barLabel, barStatus, meter),
+    micBtn, handBtn, readBtn,
+    barNext);
+  function refreshBar() {
+    const n = recipe.steps.length;
+    barLabel.textContent = activeStep >= 0 ? `Étape ${activeStep + 1} / ${n}` : `${n} étape${n > 1 ? "s" : ""}`;
+    const modes = [HandsFree.voiceOn && "voix", HandsFree.gestureOn && "geste", HandsFree.readOn && "lecture"].filter(Boolean);
+    barStatus.textContent = HandsFree.status || (modes.length ? `Mains libres : ${modes.join(", ")}` : activeStep < 0 ? "Touchez ▶ pour commencer" : "");
+    barPrev.disabled = activeStep <= 0;
+    micBtn.classList.toggle("on", HandsFree.voiceOn); micBtn.setAttribute("aria-pressed", String(HandsFree.voiceOn));
+    readBtn.classList.toggle("on", HandsFree.readOn); readBtn.setAttribute("aria-pressed", String(HandsFree.readOn));
+    handBtn.classList.toggle("on", HandsFree.gestureOn); handBtn.setAttribute("aria-pressed", String(HandsFree.gestureOn));
+    meter.hidden = !HandsFree.gestureOn;
+    // aperçu caméra dans le bouton : on voit que la caméra regarde
+    const v = HandsFree.gestureOn && HandsFree.video;
+    if (v && v.parentElement !== handBtn) { v.className = "cam-preview"; handBtn.replaceChildren(v); }
+    if (!v && !handBtn.querySelector("svg")) handBtn.replaceChildren(icon("hand"));
+    micBtn.hidden = !HandsFree.voiceSupported; readBtn.hidden = !HandsFree.readSupported; handBtn.hidden = !HandsFree.gestureSupported;
   }
 
   /* Pied */
@@ -1207,7 +1549,17 @@ function renderRecipe(recipe, { saved }) {
     footer,
   ].filter(Boolean);
 
+  if (recipe.steps.length) content.push(cookBar);
   setView(toolbar.filter(Boolean), content);
+  document.body.classList.toggle("has-cookbar", recipe.steps.length > 0);
+  HandsFree.attach({
+    next: () => goStep(activeStep + 1),
+    prev: () => goStep(activeStep - 1),
+    goto: (i) => (i >= 0 && i < recipe.steps.length ? goStep(i) : toast(`Il n'y a que ${recipe.steps.length} étapes.`)),
+    currentText: () => (activeStep >= 0 ? stepSpeech(activeStep) : recipe.steps[0] ? `Pas encore commencé. ${stepSpeech(0)}` : ""),
+    ingredientsText: () => `Ingrédients. ${ingItems.map((li) => li.querySelector(".txt").textContent).join(". ")}.`,
+    refreshBar,
+  });
   updateIngProgress();
   updateServings();
   setActive(activeStep, false);
@@ -1327,10 +1679,12 @@ function openSettings() {
   $("#settings-version").textContent = `Zéro Blabla Cuisine · version ${APP_VERSION}`;
   sitesUI.editing = null; sitesUI.test = null;
   renderSitesManager();
+  $("#set-gesture").value = store.get("zbc.gestureLevel", "normale");
   const dlg = $("#settings");
   if (typeof dlg.showModal === "function") dlg.showModal();
 }
 
+$("#set-gesture").addEventListener("change", (e) => store.set("zbc.gestureLevel", e.target.value)); // pris en compte tout de suite
 $("#settings").addEventListener("close", () => {
   if ($("#settings").returnValue !== "save") return;
   const worker = $("#set-worker").value.trim();
