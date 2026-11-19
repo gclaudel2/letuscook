@@ -417,7 +417,13 @@
         body: JSON.stringify(body),
       });
     } catch {
-      throw new ExtractError("OFFLINE", "Pas de connexion : l'extraction nécessite Internet (vos recettes enregistrées restent disponibles).");
+      if (navigator.onLine === false) {
+        throw new ExtractError("OFFLINE", "Pas de connexion : l'extraction nécessite Internet (vos recettes enregistrées restent disponibles).");
+      }
+      throw new ExtractError(
+        "RELAY_UNREACHABLE",
+        `Impossible de joindre le relais (${workerUrl}). Vérifiez son adresse dans les Réglages : en l'ouvrant dans Safari, vous devez voir un message « Relais Zéro Blabla Cuisine ».`,
+      );
     }
     const data = await res.json().catch(() => null);
     if (!res.ok || !data || data.ok === false) {
