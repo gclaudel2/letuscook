@@ -5,7 +5,7 @@
  * - Les recettes elles-mêmes sont dans IndexedDB (pas ici)
  * Changer VERSION à chaque mise en ligne d'une nouvelle version force le renouvellement du cache.
  */
-const VERSION = "zbc-1.6.0"; // = APP_VERSION dans index.html
+const VERSION = "zbc-1.7.0"; // = APP_VERSION dans index.html
 const IMAGE_CACHE = "zbc-images";
 const MAX_IMAGES = 200;
 const NETWORK_TIMEOUT_MS = 3500;
@@ -13,6 +13,7 @@ const NETWORK_TIMEOUT_MS = 3500;
 const SHELL = [
   "./",
   "./index.html",
+  "./config.js",
   "./extracteur.js",
   "./manifest.webmanifest",
   "./icons/icon-192.png",

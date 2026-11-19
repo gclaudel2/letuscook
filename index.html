@@ -317,12 +317,12 @@
     <div class="group">
       <label class="field-label" for="set-worker">Adresse du relais</label>
       <input class="input" id="set-worker" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://zbc-relais.….workers.dev">
-      <p>L'adresse donnée par Cloudflare quand vous avez déployé le relais.</p>
+      <p>Laissez vide pour utiliser le relais prévu par l'appli (affiché en grisé). À remplir seulement pour en utiliser un autre.</p>
     </div>
     <div class="group">
       <label class="field-label" for="set-code">Code d'accès</label>
       <input class="input" id="set-code" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Le code ACCESS_CODE du relais">
-      <p>Laissez vide si vous n'avez pas défini de code sur le relais.</p>
+      <p>Laissez vide si le relais n'exige pas de code, ou si le code est déjà prévu par l'appli.</p>
     </div>
     <div class="group">
       <span class="field-label">Mon carnet</span>
@@ -341,13 +341,14 @@
   </form>
 </dialog>
 
+<script src="config.js"></script>
 <script src="extracteur.js"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "1.6.0";
+const APP_VERSION = "1.7.0";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1174,7 +1175,8 @@ function renderRecipe(recipe, { saved }) {
 function openSettings() {
   let worker = "", code = "";
   try { worker = localStorage.getItem(ZBC.WORKER_URL_KEY) || ""; code = localStorage.getItem(ZBC.ACCESS_CODE_KEY) || ""; } catch { /* */ }
-  $("#set-worker").value = worker || ZBC.getWorkerUrl();
+  $("#set-worker").value = worker;
+  $("#set-worker").placeholder = ZBC.getWorkerUrl() || "https://zbc-relais.….workers.dev";
   $("#set-code").value = code;
   $("#settings-version").textContent = `Zéro Blabla Cuisine · version ${APP_VERSION}`;
   const dlg = $("#settings");

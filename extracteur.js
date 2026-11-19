@@ -14,7 +14,9 @@
   // ── Configuration ──────────────────────────────────────────────
   const CONFIG = {
     // Adresse du relais Cloudflare (à remplacer après son déploiement)
-    WORKER_URL: "https://zbc-relais.VOTRE-COMPTE.workers.dev",
+    // Valeurs par défaut : celles de config.js (communes à tous), sinon à saisir dans les Réglages
+    WORKER_URL: (window.ZBC_CONFIG && window.ZBC_CONFIG.WORKER_URL) || "https://zbc-relais.VOTRE-COMPTE.workers.dev",
+    ACCESS_CODE: (window.ZBC_CONFIG && window.ZBC_CONFIG.ACCESS_CODE) || "",
     MAX_AI_CHARS: 18000,
     MIN_TEXT_FOR_AI: 200,
   };
@@ -684,7 +686,7 @@
   async function callWorker(path, body) {
     const workerUrl = getWorkerUrl();
     if (!workerUrl) throw new ExtractError("NO_RELAY", "Indiquez d'abord l'adresse du relais dans les Réglages.");
-    const accessCode = readSetting(ACCESS_CODE_KEY);
+    const accessCode = readSetting(ACCESS_CODE_KEY) || CONFIG.ACCESS_CODE;
     let res;
     try {
       res = await fetch(workerUrl + path, {

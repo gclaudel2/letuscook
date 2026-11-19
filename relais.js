@@ -6,7 +6,6 @@
  *
  *   POST /page  { url }               → { ok, html, finalUrl }      (récupère la page de recette)
  *   POST /ia    { url, title, text }  → { ok, recipe }              (secours IA, si pas de JSON-LD)
- *   POST /recherche { q }             → { ok, results: [{url,title,snippet}] }  (recherche de recettes)
  *
  * Variables (Settings → Variables and Secrets) :
  *   ALLOWED_ORIGINS    ex. "https://votre-compte.github.io"  (plusieurs : séparées par des virgules)
@@ -18,9 +17,6 @@
  *     ANTHROPIC_API_KEY  (Claude, payant)              ANTHROPIC_MODEL défaut : claude-haiku-5-5
  *     OPENAI_API_KEY     (ChatGPT, payant)             OPENAI_MODEL    obligatoire si OpenAI
  *   LLM_PROVIDER       facultatif : fournisseur à essayer en premier ("gemini", "mistral", "anthropic", "openai")
- *   Recherche de recettes :
- *     TAVILY_API_KEY     (tavily.com, 1 000 recherches/mois gratuites)                     [Secret]
- *     SEARCH_DOMAINS     facultatif : sites où chercher, séparés par des virgules ("*" = tout le web)
  */
 
 const FETCH_TIMEOUT_MS = 12000;
@@ -359,74 +355,6 @@ async function handleAi(body, env) {
 }
 
 
-// ── /recherche : recherche de recettes (Tavily) ──────────────────
-const DEFAULT_SEARCH_DOMAINS = [
-  "marmiton.org", "750g.com", "cuisineaz.com", "cuisine.journaldesfemmes.fr", "ptitchef.com",
-  "cuisineactuelle.fr", "chefsimon.com", "ricardocuisine.com", "papillesetpupilles.fr", "hervecuisine.com",
-  "lacuisinedebernard.com", "ladycoquillette.fr", "odelices.ouest-france.fr", "meilleurduchef.com",
-  "atelierdeschefs.fr", "elle.fr", "iletaitunefoislapatisserie.com", "cuisine-et-mets.com",
-];
-const SEARCH_TIMEOUT_MS = 15000;
-
-/** Pages de liste ("toutes nos recettes de…"), pas des recettes : on les écarte. */
-function looksLikeListing(url, title) {
-  return /\/(?:recettes?|categories?|tag|tags|dossiers?|selection|idees?)\/?(?:[?#]|$)/i.test(url)
-    || /^(?:\d+\s+)?(?:recettes|nos recettes|toutes les recettes|id[ée]es)\b/i.test(title || "")
-    || /\b\d+\s+recettes\b/i.test(title || "");
-}
-
-async function handleSearch(body, env) {
-  if (!env.TAVILY_API_KEY) {
-    throw new RelayError("SEARCH_DISABLED", "La recherche n'est pas configurée : ajoutez le secret TAVILY_API_KEY sur Cloudflare.", 422);
-  }
-  const q = String(body?.q || "").replace(/\s+/g, " ").trim().slice(0, 150);
-  if (q.length < 2) throw new RelayError("INVALID_QUERY", "Tapez au moins 2 lettres.", 400);
-
-  const domains = (env.SEARCH_DOMAINS || DEFAULT_SEARCH_DOMAINS.join(","))
-    .split(",").map((d) => d.trim().toLowerCase()).filter(Boolean);
-  const query = /\brecettes?\b/i.test(q) ? q : `recette ${q}`;
-
-  let res;
-  try {
-    res = await fetch("https://api.tavily.com/search", {
-      method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${env.TAVILY_API_KEY}` },
-      body: JSON.stringify({
-        query,
-        search_depth: "basic",
-        max_results: 12,
-        ...(domains.includes("*") ? {} : { include_domains: domains }),
-      }),
-      signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS),
-    });
-  } catch {
-    throw new RelayError("SEARCH_FAILED", "Le service de recherche ne répond pas. Réessayez.", 504);
-  }
-  if (res.status === 401 || res.status === 403) throw new RelayError("SEARCH_FAILED", "Clé Tavily refusée : vérifiez le secret TAVILY_API_KEY.", 502);
-  if (res.status === 429 || res.status === 432 || res.status === 433) throw new RelayError("SEARCH_QUOTA", "Quota de recherche Tavily atteint (1 000 par mois en gratuit).", 429);
-  if (!res.ok) throw new RelayError("SEARCH_FAILED", `Le service de recherche a répondu une erreur (${res.status}).`, 502);
-
-  const data = await res.json().catch(() => ({}));
-  const seen = new Set();
-  const results = [];
-  for (const r of data.results || []) {
-    let url;
-    try { url = new URL(r.url); } catch { continue; }
-    if (!/^https?:$/.test(url.protocol)) continue;
-    url.hash = "";
-    const key = url.toString().replace(/\/$/, "");
-    if (seen.has(key) || looksLikeListing(url.pathname, r.title)) continue;
-    seen.add(key);
-    results.push({
-      url: url.toString(),
-      title: String(r.title || "").replace(/\s+/g, " ").trim().slice(0, 200),
-      snippet: String(r.content || "").replace(/\s+/g, " ").trim().slice(0, 220),
-    });
-    if (results.length >= 10) break;
-  }
-  return { ok: true, query, results };
-}
-
 // ── Point d'entrée ───────────────────────────────────────────────
 export default {
   async fetch(request, env) {
@@ -435,7 +363,7 @@ export default {
 
     const { pathname } = new URL(request.url);
     try {
-      if (request.method !== "POST") throw new RelayError("NOT_FOUND", "Relais Zéro Blabla Cuisine : utilisez POST /page, /ia ou /recherche.", 404);
+      if (request.method !== "POST") throw new RelayError("NOT_FOUND", "Relais Zéro Blabla Cuisine : utilisez POST /page ou /ia.", 404);
       const origin = request.headers.get("origin") || "";
       if (!isAllowedOrigin(origin, env)) {
         throw new RelayError(
@@ -448,7 +376,6 @@ export default {
       const body = await request.json().catch(() => null);
       if (pathname === "/page") return json(await handlePage(body), 200, cors);
       if (pathname === "/ia") return json(await handleAi(body, env), 200, cors);
-      if (pathname === "/recherche") return json(await handleSearch(body, env), 200, cors);
       throw new RelayError("NOT_FOUND", "Route inconnue.", 404);
     } catch (err) {
       if (err instanceof RelayError) return json({ ok: false, error: { code: err.code, message: err.message } }, err.status, cors);
