@@ -1,6 +1,6 @@
 {
-  "name": "Zéro Blabla Cuisine",
-  "short_name": "Zéro Blabla",
+  "name": "letuscook",
+  "short_name": "letuscook",
   "description": "La recette. Rien que la recette : sans pub ni blabla, en mode cuisine.",
   "lang": "fr",
   "id": "./",
@@ -10,10 +10,28 @@
   "orientation": "portrait",
   "background_color": "#FAF6EF",
   "theme_color": "#FAF6EF",
-  "categories": ["food", "lifestyle"],
+  "categories": [
+    "food",
+    "lifestyle"
+  ],
   "icons": [
-    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
   ]
 }
