@@ -1718,6 +1718,18 @@
   }
 
   /** Recettes de chefs de l'index qui correspondent à la recherche. */
+  /** Nombre de recettes de chefs indexées (sources activées). */
+  function chefIndexCount() {
+    const idx = readChefIndex(); const off = chefSourcesOff();
+    return allChefCatalogs().filter((c) => !off.includes(c.id) && idx.sites[c.id]).reduce((n, c) => n + idx.sites[c.id].items.length, 0);
+  }
+  /** Toutes les recettes de chefs indexées, pour les parcourir : [{ url, title, image, site, sourceId }] */
+  function chefIndexItems() {
+    const idx = readChefIndex(); const off = chefSourcesOff();
+    return allChefCatalogs().filter((c) => !off.includes(c.id) && idx.sites[c.id]).flatMap((c) =>
+      idx.sites[c.id].items.map((it) => ({ url: it.u, title: it.t, image: it.i || cachedImage(it.u) || undefined, site: c.name, sourceId: c.id, chefSite: true })));
+  }
+
   function searchChefIndex(words, perSource = 4) {
     const idx = readChefIndex();
     const off = chefSourcesOff();
@@ -1737,19 +1749,22 @@
     if (query.length < 2) throw new ExtractError("INVALID_QUERY", "Tapez au moins 2 lettres.");
     const words = queryWords(query);
     const sites = activeSites();
-    if (!sites.length) throw new ExtractError("NO_SITES", "Aucun site de recherche activé : choisissez-en dans les Réglages.");
+    const onlyIndex = !sites.length; // aucun site de recherche : on cherche seulement dans l'index des chefs
+    if (onlyIndex && !chefIndexCount()) {
+      throw new ExtractError("NO_SITES", "Aucun site de recherche activé et aucune recette de chef indexée : choisissez des sites dans les Réglages.");
+    }
     const perSite = await Promise.all(sites.map(async (site) => {
       const { links, error } = await searchOneSite(site, query, words);
       onSite(site.name, links.length, error);
       return links;
     }));
     // Recettes de chefs de l'index (instantané, sans réseau)
-    const fromIndex = searchChefIndex(words);
+    const fromIndex = searchChefIndex(words, onlyIndex ? MAX_RESULTS : 4);
     fromIndex.forEach((list) => { if (list.length) onSite(`${list[0].site} (index)`, list.length, null); });
     const lists = perSite.concat(fromIndex);
     const results = [];
     const seen = new Set();
-    for (let i = 0; i < 4 && results.length < MAX_RESULTS; i++) {
+    for (let i = 0; i < (onlyIndex ? MAX_RESULTS : 4) && results.length < MAX_RESULTS; i++) {
       for (const list of lists) {
         const r = list[i];
         if (r && !seen.has(r.url) && results.length < MAX_RESULTS) {
@@ -1784,7 +1799,7 @@
 
   window.ZBC = {
     CONFIG, ACCESS_CODE_KEY, WORKER_URL_KEY, getWorkerUrl, ExtractError,
-    extractRecipe, extractFromHtml, parseTargetUrl, searchRecipes, readPhotos, recipeFromText, photosToRecipeAI, analyzeUrl, previewImages, rememberImage, cachedImage, synthesize, refreshChefIndex, chefIndexStatus, chefIndexStale, setChefSourceEnabled, CHEF_CATALOGS, detectChefSource, addChefSource, removeChefSource, getSearchSites, saveSearchSites, resetSearchSites, rememberRemovedSite, normalizeHost, testSearchSite, DEFAULT_SEARCH_SITES,
+    extractRecipe, extractFromHtml, parseTargetUrl, searchRecipes, readPhotos, recipeFromText, photosToRecipeAI, analyzeUrl, previewImages, rememberImage, cachedImage, synthesize, refreshChefIndex, chefIndexStatus, chefIndexStale, setChefSourceEnabled, CHEF_CATALOGS, detectChefSource, addChefSource, removeChefSource, chefIndexItems, chefIndexCount, matchesQuery, queryWords, getSearchSites, saveSearchSites, resetSearchSites, rememberRemovedSite, normalizeHost, testSearchSite, DEFAULT_SEARCH_SITES,
     parseIngredient, formatIngredient, formatQuantity, parseDuration, parseServings,
   };
 })();

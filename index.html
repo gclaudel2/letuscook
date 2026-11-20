@@ -272,6 +272,10 @@
   .photo-block .or { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; color: var(--muted); font-size: 14px; }
   .photo-block .or::before, .photo-block .or::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
   .photo-btn { width: 100%; }
+  .browse-chefs { width: 100%; margin-top: 14px; gap: 10px; text-decoration: none; color: var(--ink); }
+  .page-title { margin: 8px 0 6px; font: var(--head-w) 28px/1.1 var(--head); }
+  .chef-sources { margin: 12px 0 4px; }
+  #chef-list + .btn { width: 100%; margin-top: 12px; }
   #chef-index .sync-btn { flex: none; width: 44px; height: 44px; margin-left: auto; color: var(--accent); }
   #chef-index .sync-btn + .sync-btn { margin-left: 0; color: var(--muted); }
   #chef-index .sync-btn svg { width: 20px; height: 20px; }
@@ -628,14 +632,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.13.0"></script>
-<script src="extracteur.js?v=2.13.0"></script>
+<script src="config.js?v=2.14.0"></script>
+<script src="extracteur.js?v=2.14.0"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.13.0";
+const APP_VERSION = "2.14.0";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1288,6 +1292,7 @@ function route() {
   if (hash === "#/apercu") {
     return state.preview ? renderRecipe(state.preview, { saved: false }) : go("#/", true);
   }
+  if (hash === "#/chefs") return renderChefBrowser();
   state.tab = hash === "#/carnet" ? "carnet" : hash === "#/lien" ? "extraire" : "recherche";
   renderHome();
   if (state.tab === "recherche" && state.search.scrollY) {
@@ -1621,7 +1626,7 @@ function renderSearchPanel() {
   if (S.loading && !S.results.length) {
     const done = S.sources.length;
     parts.push(h("div", { class: "search-status", id: "search-status", "aria-live": "polite" },
-      `Recherche sur ${enabledSites().length} sites de recettes… ${done}/${enabledSites().length}`,
+      enabledSites().length ? `Recherche sur ${enabledSites().length} sites de recettes… ${done}/${enabledSites().length}` : "Recherche dans les recettes de chefs…",
       done ? h("div", { class: "sources" }, sourcesText()) : null));
   }
   if (S.results.length) {
@@ -1630,7 +1635,14 @@ function renderSearchPanel() {
     parts.push(renderSearchControls());
     parts.push(h("ul", { class: "results", id: "results" }, visibleResults().map(resultCard)));
   } else if (!S.loading && !S.error) {
-    parts.push(h("p", { class: "hint" }, `Recherche sur ${enabledSites().length} sites de cuisine (liste dans les Réglages). Comparez temps, difficulté et notes d'un coup d'œil, puis ouvrez la recette en mode cuisine.`));
+    const nSites = enabledSites().length, nChefs = ZBC.chefIndexCount();
+    parts.push(h("p", { class: "hint" }, nSites
+      ? `Recherche sur ${nSites} sites de cuisine${nChefs ? ` et ${nChefs} recettes de chefs` : ""} (liste dans les Réglages). Comparez temps, difficulté et notes d'un coup d'œil, puis ouvrez la recette en mode cuisine.`
+      : `Recherche dans ${nChefs} recettes de chefs (aucun site de recherche activé dans les Réglages).`));
+  }
+  const nChefs = ZBC.chefIndexCount();
+  if (!S.results.length && !S.loading && nChefs) {
+    parts.push(h("a", { class: "btn browse-chefs", href: "#/chefs" }, icon("list"), `Parcourir les ${nChefs} recettes de chefs`));
   }
   parts.push(h("p", { class: "version" }, `letuscook · version ${APP_VERSION}`));
   return h("section", { "aria-label": "Chercher une recette" }, parts);
@@ -1840,7 +1852,7 @@ async function runSearch(raw) {
 }
 
 function openResult(res) {
-  state.search.scrollY = window.scrollY;
+  if (location.hash === "#/chefs") { chefBrowse.scrollY = window.scrollY; state.returnTo = "#/chefs"; } else { state.search.scrollY = window.scrollY; state.returnTo = ""; }
   const saved = findBySource(res.url) || (res.finalUrl && findBySource(res.finalUrl));
   if (saved) return go(`#/r/${encodeURIComponent(saved.id)}`);
   if (res.status === "ok" && res.recipe) {
@@ -1854,6 +1866,78 @@ function openResult(res) {
   // Sinon : extraction complète (avec l'IA si besoin), journal visible dans l'onglet Lien
   go("#/lien");
   runExtraction(res.url);
+}
+
+/* ════════════ Parcourir les recettes de chefs (index) ════════════ */
+const chefBrowse = { source: "all", q: "", shown: 40, seed: 0 };
+
+function renderChefBrowser() {
+  const all = ZBC.chefIndexItems();
+  const sources = [...new Map(all.map((x) => [x.sourceId, x.site])).entries()];
+  const toolbar = [
+    h("button", { class: "icon-btn", "aria-label": "Retour", onclick: () => go("#/") }, icon("back")),
+    h("span", { class: "spacer" }),
+    h("button", { class: "icon-btn", onclick: () => { chefBrowse.seed = Math.random(); chefBrowse.shown = 40; renderChefBrowser(); } }, icon("refresh"), h("span", { class: "label" }, "Mélanger")),
+  ];
+  const filter = h("input", {
+    class: "input", type: "search", placeholder: "Filtrer (ex. homard, chocolat, Ducasse…)", value: chefBrowse.q,
+    "aria-label": "Filtrer les recettes de chefs", enterkeyhint: "search",
+  });
+  const listBox = h("ul", { class: "results", id: "chef-list" });
+  const countLine = h("p", { class: "search-status", "aria-live": "polite" });
+  const more = h("button", { class: "btn add-site", type: "button" }, "Afficher plus");
+
+  const filtered = () => {
+    const words = ZBC.queryWords(chefBrowse.q);
+    let list = all.filter((x) => chefBrowse.source === "all" || x.sourceId === chefBrowse.source);
+    if (normSpaceUI(chefBrowse.q).length >= 2) list = list.filter((x) => ZBC.matchesQuery(`${x.title} ${new URL(x.url).pathname}`, words));
+    if (chefBrowse.seed) {
+      const key = (u) => { let hsh = Math.floor(chefBrowse.seed * 1e9); for (let i = 0; i < u.length; i++) hsh = (hsh * 31 + u.charCodeAt(i)) | 0; return hsh; };
+      list = list.slice().sort((a, b) => key(a.url) - key(b.url));
+    }
+    return list;
+  };
+  const card = (x) => h("li", {},
+    h("button", { class: "result", type: "button", onclick: () => openResult({ url: x.url, title: x.title, image: x.image, site: x.site, chefSite: true, status: "pending" }) },
+      thumbWithImage("r-thumb", safeHttpUrl(x.image), (x.title || "?").trim().charAt(0).toUpperCase()),
+      h("div", { class: "r-body" },
+        h("div", { class: "r-name" }, x.title),
+        h("div", { class: "r-meta" }, h("span", {}, x.site), h("span", { class: "badge chef" }, "Recette de chef")))));
+  const draw = () => {
+    const list = filtered();
+    const visible = list.slice(0, chefBrowse.shown);
+    listBox.replaceChildren(...visible.map(card));
+    if (!list.length) listBox.append(h("li", { class: "empty" }, "Aucune recette de chef ne correspond."));
+    countLine.textContent = `${list.length} recette${list.length > 1 ? "s" : ""}${list.length > visible.length ? ` · ${visible.length} affichées` : ""}`;
+    more.hidden = list.length <= visible.length;
+    // Photos manquantes : demandées au relais pour les recettes affichées (12 par appel)
+    const missing = visible.filter((x) => !x.image).map((x) => x.url).slice(0, 24);
+    for (let i = 0; i < missing.length; i += 12) {
+      ZBC.previewImages(missing.slice(i, i + 12)).then((images) => {
+        let changed = false;
+        all.forEach((x) => { if (!x.image && images[x.url]) { x.image = images[x.url]; changed = true; } });
+        if (changed && location.hash === "#/chefs") listBox.replaceChildren(...filtered().slice(0, chefBrowse.shown).map(card));
+      });
+    }
+  };
+  filter.addEventListener("input", () => { chefBrowse.q = filter.value; chefBrowse.shown = 40; draw(); });
+  more.addEventListener("click", () => { chefBrowse.shown += 40; draw(); });
+  const chip = (id, label) => h("button", {
+    type: "button", class: "filter", "aria-pressed": String(chefBrowse.source === id),
+    onclick: () => { chefBrowse.source = id; chefBrowse.shown = 40; renderChefBrowser(); },
+  }, label);
+
+  setView(toolbar, [
+    h("h2", { class: "page-title" }, "Recettes de chefs"),
+    h("p", { class: "hint", style: "margin-top:0" }, `${all.length} recettes indexées sur ${sources.length} site${sources.length > 1 ? "s" : ""}. Touchez une recette pour l'ouvrir.`),
+    filter,
+    h("div", { class: "filters chef-sources" }, chip("all", "Toutes"), ...sources.map(([id, name]) => chip(id, name))),
+    countLine,
+    listBox,
+    more,
+  ]);
+  draw();
+  if (chefBrowse.scrollY) { const y = chefBrowse.scrollY; chefBrowse.scrollY = 0; requestAnimationFrame(() => window.scrollTo(0, y)); }
 }
 
 function renderCarnet() {
@@ -1960,7 +2044,7 @@ function renderRecipe(recipe, { saved }) {
 
   /* Barre du haut */
   const toolbar = [
-    h("button", { class: "icon-btn", "aria-label": "Retour", onclick: () => go(saved ? "#/carnet" : "#/") }, icon("back")),
+    h("button", { class: "icon-btn", "aria-label": "Retour", onclick: () => go(saved ? "#/carnet" : state.returnTo || "#/") }, icon("back")),
     h("span", { class: "spacer" }),
     Wake.supported && h("button", { class: "icon-btn", id: "btn-wake", "aria-pressed": "false", onclick: () => (Wake.wanted ? Wake.disable() : Wake.enable()) },
       icon("sun"), h("span", { class: "label" }, "Écran")),
