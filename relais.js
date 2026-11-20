@@ -278,14 +278,16 @@ async function callGemini(env, prompt, images = []) {
   // Photos : bien plus longues à analyser que du texte → délai plus long, et réflexion du modèle réduite
   const timeoutMs = images.length ? PHOTO_TIMEOUT_MS : GEMINI_TIMEOUT_MS;
   let thinking = { thinkingLevel: "low" }; // retiré automatiquement si le modèle ne le connaît pas
-  let reword = false; // après un refus « RECITATION » : on demande de reformuler au lieu de recopier
+  // Après un refus « RECITATION » (Gemini ne recopie pas un texte publié) : 1 = reformuler,
+  // 2 = format compact (ingrédients découpés en champs, étapes résumées en style télégraphique)
+  let reword = 0;
   let last;
   for (const model of models) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         const generationConfig = { responseMimeType: "application/json", temperature: reword ? 0.4 : 0, maxOutputTokens: 8192, ...(thinking ? { thinkingConfig: thinking } : {}) };
-        const userText = reword
-          ? `${prompt}\nIMPORTANT : ne recopie pas le texte mot à mot. Reformule brièvement chaque étape avec tes propres mots (mêmes gestes, mêmes temps, mêmes températures) ; garde les quantités exactes.`
+        const userText = reword === 2 ? `${prompt}\n${COMPACT_INSTRUCTIONS}`
+          : reword === 1 ? `${prompt}\nIMPORTANT : ne recopie pas le texte mot à mot. Reformule brièvement chaque étape avec tes propres mots (mêmes gestes, mêmes temps, mêmes températures) ; garde les quantités exactes.`
           : prompt;
         const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
           method: "POST",
@@ -309,12 +311,13 @@ async function callGemini(env, prompt, images = []) {
         if (!text && data.promptFeedback?.blockReason) throw new Error(`requête bloquée par Gemini (${data.promptFeedback.blockReason})`);
         if (!text.trim()) {
           const reason = cand?.finishReason || "inconnue";
-          if (reason === "RECITATION" && !reword) { reword = true; attempt--; continue; } // texte de livre : on redemande en reformulant
+          if (reason === "RECITATION" && reword < 2) { reword++; attempt--; continue; } // texte de livre : on redemande autrement
           last = new Error(EMPTY_REASONS[reason] || `réponse vide (raison : ${reason})`);
           break; // modèle suivant
         }
         try {
-          return parseJsonText(text);
+          const out = parseJsonText(text);
+          return reword === 2 ? fromCompact(out) : out;
         } catch {
           last = new Error(cand?.finishReason === "MAX_TOKENS" ? "réponse trop longue, coupée" : "réponse illisible du modèle");
           break;
@@ -330,8 +333,30 @@ async function callGemini(env, prompt, images = []) {
   throw last;
 }
 
+const COMPACT_INSTRUCTIONS = [
+  "IMPORTANT : ne recopie aucune phrase. Réponds dans ce format JSON compact :",
+  '{"found":true,"title":"…","servings":4,"prepTimeMinutes":20,"cookTimeMinutes":30,',
+  '"ingredients":[{"q":"250","u":"g","n":"farine","s":"Pour la pâte"}],',
+  '"steps":[{"text":"…","section":"Pour la pâte"}]}',
+  "Ingrédients : q = quantité (texte, vide si aucune), u = unité (vide si aucune), n = nom seul, s = sous-partie éventuelle.",
+  "Étapes : résume chaque étape en style télégraphique avec TES mots, 15 mots maximum, en gardant gestes, durées et températures.",
+].join("\n");
+
+/** Format compact → format habituel (ingrédients en texte « [sous-partie] 250 g farine »). */
+function fromCompact(out) {
+  if (!out || typeof out !== "object") return out;
+  if (Array.isArray(out.ingredients)) {
+    out.ingredients = out.ingredients.map((it) => {
+      if (typeof it === "string") return it;
+      const line = [it?.q, it?.u, it?.n].map((x) => String(x ?? "").trim()).filter(Boolean).join(" ");
+      return it?.s ? `[${String(it.s).trim()}] ${line}` : line;
+    }).filter(Boolean);
+  }
+  return out;
+}
+
 const EMPTY_REASONS = {
-  RECITATION: "Gemini refuse de recopier ce texte publié, même reformulé",
+  RECITATION: "Gemini refuse de reprendre ce texte publié, même résumé",
   SAFETY: "réponse bloquée par le filtre de sécurité de Gemini",
   PROHIBITED_CONTENT: "réponse bloquée par Gemini",
   MAX_TOKENS: "réponse trop longue, coupée",
