@@ -643,14 +643,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.17.1"></script>
-<script src="extracteur.js?v=2.17.1"></script>
+<script src="config.js?v=2.17.2"></script>
+<script src="extracteur.js?v=2.17.2"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.17.1";
+const APP_VERSION = "2.17.2";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1126,7 +1126,7 @@ const HandsFree = {
     rec.onerror = (e) => {
       if (e.error === "not-allowed" || e.error === "service-not-allowed") {
         this.stopVoice();
-        toast("Micro ou reconnaissance vocale refusés. Vérifiez Réglages iPhone › Safari › Micro, et que la Dictée est activée.");
+        toast("Micro ou reconnaissance vocale refusés. Autorisez le micro pour ce site dans les réglages du navigateur, et vérifiez que la dictée vocale est activée sur le smartphone.");
       } else if (e.error === "network") {
         this.setStatus("Reconnaissance vocale : réseau indisponible");
       }
@@ -1172,7 +1172,7 @@ const HandsFree = {
         } catch (err) {
           if (token !== this.speakToken) return;
           console.warn("voix Gemini indisponible", err);
-          this.setStatus(err && err.code === "VOICE_DISABLED" ? "Voix de l'iPhone (Gemini non configuré)" : "Voix Gemini indisponible : voix de l'iPhone");
+          this.setStatus(err && err.code === "VOICE_DISABLED" ? "Voix du smartphone (Gemini non configuré)" : "Voix Gemini indisponible : voix du smartphone");
         }
       }
       // Secours : voix intégrée (muette si l'iPhone est en mode silencieux)
@@ -1445,13 +1445,13 @@ function renderExtractPanel() {
   const photo = h("div", { class: "photo-block" },
     h("div", { class: "or" }, h("span", {}, "ou")),
     h("div", { class: "segs photo-mode", role: "group", "aria-label": "Lecture de la photo" },
-      modeBtn("iphone", "Sur l'iPhone"), modeBtn("ia", "Par l'IA")),
+      modeBtn("iphone", "Sur le smartphone"), modeBtn("ia", "Par l'IA")),
     h("button", { class: "btn photo-btn", type: "button", disabled: state.loading, onclick: () => photoInput.click() },
       icon("camera"), state.loadingPhoto ? "Lecture de la photo…" : "Photo d'une recette"),
     photoInput,
     h("p", { class: "hint" }, mode === "ia"
       ? "Lue par l'IA (Gemini) : le meilleur résultat, même pour un cahier écrit à la main. La photo est envoyée à Google via votre relais ; Internet nécessaire."
-      : "Lue sur l'iPhone, sans IA et sans rien envoyer : bien pour un texte imprimé, page à plat, photo de face et bien éclairée."),
+      : "Lue sur le smartphone, sans IA et sans rien envoyer : bien pour un texte imprimé, page à plat, photo de face et bien éclairée."),
     h("p", { class: "hint" }, "Livre, magazine, fiche ou cahier. Plusieurs photos si la recette tient sur 2 pages."));
 
   return h("section", { "aria-label": "Extraire une recette" },
@@ -1461,7 +1461,7 @@ function renderExtractPanel() {
     state.lastError && state.lastPhotos && h("button", {
       class: "btn retry-photo", type: "button",
       onclick: () => runPhotoExtraction(state.lastPhotos, state.lastPhotoMode === "ia" ? "iphone" : "ia"),
-    }, icon("camera"), state.lastPhotoMode === "ia" ? "Réessayer en lisant sur l'iPhone" : "Réessayer avec l'IA"),
+    }, icon("camera"), state.lastPhotoMode === "ia" ? "Réessayer en lisant sur le smartphone" : "Réessayer avec l'IA"),
     state.lastError && state.ocrText && h("details", { class: "ocr-text" }, h("summary", {}, "Voir le texte lu sur la photo"), h("pre", {}, state.ocrText.trim())),
     renderLog(),
     h("p", { class: "hint" }, "Pour un lien, dans Safari : Partager › Copier, puis revenez ici et touchez le bouton Coller."),
@@ -2291,7 +2291,7 @@ function renderRecipe(recipe, { saved }) {
   const VIA = {
     jsonld: "données structurées du site (sans IA)",
     html: "lecture du texte de la page (sans IA)",
-    photo: "lecture de la photo sur l'iPhone (sans IA)",
+    photo: "lecture de la photo sur le smartphone (sans IA)",
     "photo-llm": `lecture de la photo par l'IA${recipe.aiProvider ? ` (${{ gemini: "Gemini", anthropic: "Claude", openai: "ChatGPT" }[recipe.aiProvider] || recipe.aiProvider})` : ""}`,
     llm: `analyse IA${recipe.aiProvider ? ` (${{ gemini: "Gemini", mistral: "Mistral", anthropic: "Claude", openai: "ChatGPT" }[recipe.aiProvider] || recipe.aiProvider})` : ""}`,
   };
