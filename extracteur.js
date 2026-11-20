@@ -1546,6 +1546,9 @@
         if (n === 1) throw err;
         break; // fin de la pagination (404) ou site indisponible : on garde ce qu'on a
       }
+      if (n === 1 && !links.length) {
+        throw new ExtractError("NO_LINKS", "Aucune recette trouvée sur sa page de liste (site protégé ou modifié). Mettez le relais à jour, puis réessayez.");
+      }
       let added = 0;
       for (const l of links) {
         if (!items.has(l.u)) { items.set(l.u, { u: l.u, t: l.t || titleFromSlug(new URL(l.u).pathname), i: l.i || "" }); added++; }
@@ -1562,12 +1565,14 @@
    * Met à jour l'index (sources activées). force = ignorer l'âge de l'index.
    * onProgress({ site, page, count, done, total }).
    */
-  function refreshChefIndex({ force = false, onProgress = () => {} } = {}) {
+  function refreshChefIndex({ force = false, only = null, onProgress = () => {} } = {}) {
     if (indexing) return indexing;
     indexing = (async () => {
       const idx = readChefIndex();
       const off = chefSourcesOff();
-      const todo = CHEF_CATALOGS.filter((c) => !off.includes(c.id) && (force || !idx.sites[c.id] || Date.now() - idx.sites[c.id].at > INDEX_MAX_AGE || idx.sites[c.id].error));
+      const todo = only
+        ? CHEF_CATALOGS.filter((c) => c.id === only) // une seule source, à la demande (bouton de sa ligne)
+        : CHEF_CATALOGS.filter((c) => !off.includes(c.id) && (force || !idx.sites[c.id] || Date.now() - idx.sites[c.id].at > INDEX_MAX_AGE || idx.sites[c.id].error));
       let done = 0;
       // 2 sources à la fois : rapide sans surcharger le relais
       const queue = todo.slice();

@@ -31,6 +31,7 @@ const LLM_TIMEOUT_MS = 40000;
 const GEMINI_TIMEOUT_MS = 25000; // par essai (plusieurs essais possibles)
 const PHOTO_TIMEOUT_MS = 90000;
 const PHOTO_CALL_TIMEOUT_MS = 50000; // un appel /photo : sous la minute, au-delà l'iPhone coupe // lecture de photos : l'image prend plus de temps à analyser
+const READER_TIMEOUT_MS = 25000;
 const MAX_HTML_BYTES = 3 * 1024 * 1024; // au-delà on tronque : le JSON-LD est presque toujours au début
 const MAX_AI_CHARS = 20000;
 
@@ -182,8 +183,37 @@ function decodeHtml(bytes, contentType) {
   catch { return new TextDecoder("utf-8").decode(bytes); }
 }
 
-async function handlePage(body) {
+/*
+ * Lecteur de secours (r.jina.ai) : certains sites (ex. Guide Michelin) refusent les serveurs de Cloudflare
+ * ou renvoient une page « vérification anti-robot ». On redemande alors la page via ce service public,
+ * qui l'ouvre comme un navigateur et rend son HTML. Clé facultative : secret JINA_API_KEY (plus de quota).
+ */
+const READER_URL = "https://r.jina.ai/";
+const looksLikeChallenge = (html) => html.length < 60000 && /just a moment|cf-chl|challenge-platform|captcha|access denied|attention required|enable javascript and cookies|request unsuccessful|pardon our interruption/i.test(html);
+
+async function readerPage(url, env) {
+  let res;
+  try {
+    res = await fetch(READER_URL + url, {
+      headers: { "x-return-format": "html", accept: "text/html", ...(env && env.JINA_API_KEY ? { authorization: `Bearer ${env.JINA_API_KEY}` } : {}) },
+      signal: AbortSignal.timeout(READER_TIMEOUT_MS),
+    });
+  } catch {
+    return null;
+  }
+  if (!res.ok) { try { await res.body?.cancel(); } catch { /* */ } return null; }
+  const html = decodeHtml(await readLimited(res, MAX_HTML_BYTES), "text/html; charset=utf-8");
+  if (html.length < 200 || looksLikeChallenge(html)) return null;
+  return { ok: true, html, finalUrl: url, via: "lecteur" };
+}
+
+async function handlePage(body, env, opts = {}) {
   const url = assertAllowedUrl(String(body?.url || "").trim());
+  if (opts.reader) {
+    const viaReader = await readerPage(url.toString(), env);
+    if (viaReader) return viaReader;
+    throw new RelayError("FETCH_FAILED", "Ce site bloque la lecture automatique de ses pages (même via le lecteur de secours).", 502);
+  }
   let res;
   try {
     res = await fetch(url.toString(), { headers: BROWSER_HEADERS, redirect: "follow", signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
@@ -195,6 +225,11 @@ async function handlePage(body) {
   assertAllowedUrl(finalUrl); // la redirection finale doit aussi être autorisée
 
   if (!res.ok) {
+    if ([401, 403, 429, 503].includes(res.status) || (res.status >= 520 && res.status <= 530)) {
+      try { await res.body?.cancel(); } catch { /* */ }
+      const viaReader = await readerPage(url.toString(), env); // site qui refuse le relais : lecteur de secours
+      if (viaReader) return viaReader;
+    }
     const msg = res.status === 403 || res.status === 429 ? "Ce site bloque la lecture automatique de ses pages."
       : res.status >= 520 && res.status <= 530 ? `Ce site refuse la connexion du relais (erreur ${res.status}).`
       : res.status === 404 ? "Page introuvable (404)."
@@ -206,6 +241,10 @@ async function handlePage(body) {
     throw new RelayError("NOT_HTML", "Cette adresse ne mène pas à une page web.", 415);
   }
   const html = decodeHtml(await readLimited(res, MAX_HTML_BYTES), contentType);
+  if (looksLikeChallenge(html)) { // page « vérification anti-robot » au lieu du contenu
+    const viaReader = await readerPage(url.toString(), env);
+    if (viaReader) return viaReader;
+  }
   return { ok: true, html, finalUrl };
 }
 
@@ -604,12 +643,22 @@ function imageIn(html) {
   return [attr("data-src"), attr("data-lazy-src"), fromSet, attr("src")].find((u) => u && !/^data:/i.test(u) && !/\.svg(?:[?#]|$)/i.test(u)) || "";
 }
 
-async function handleLinks(body) {
-  const page = await handlePage(body); // mêmes protections que /page
+async function handleLinks(body, env) {
   const motif = String(body?.motif || "");
   if (!motif || motif.length > 200) throw new RelayError("INVALID_PATTERN", "Motif de lien invalide.", 400);
   let re;
   try { re = new RegExp(motif, "i"); } catch { throw new RelayError("INVALID_PATTERN", "Motif de lien invalide.", 400); }
+  const page = await handlePage(body, env); // mêmes protections que /page
+  let links = linksIn(page, re);
+  if (!links.length && !page.via) {
+    // aucune recette : page protégée ou construite en JavaScript → lecteur de secours
+    const again = await handlePage(body, env, { reader: true }).catch(() => null);
+    if (again) { const more = linksIn(again, re); if (more.length) return { ok: true, finalUrl: page.finalUrl, links: more, via: again.via }; }
+  }
+  return { ok: true, finalUrl: page.finalUrl, links, via: page.via };
+}
+
+function linksIn(page, re) {
   const base = new URL(page.finalUrl);
   const found = new Map();
   const anchors = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
@@ -646,7 +695,7 @@ async function handleLinks(body) {
     const img = imagesIn(html.slice(from, sp.start)).pop() || imagesIn(html.slice(sp.end, to))[0];
     if (img) { try { item.i = new URL(img, base).toString(); } catch { /* adresse invalide */ } }
   });
-  return { ok: true, finalUrl: page.finalUrl, links: [...found.values()] };
+  return [...found.values()];
 }
 
 // ── /apercus : photo principale de plusieurs recettes d'un coup ─────────
@@ -717,10 +766,10 @@ export default {
       }
       await checkAccess(request, env);
       const body = await request.json().catch(() => null);
-      if (pathname === "/page") return json(await handlePage(body), 200, cors);
+      if (pathname === "/page") return json(await handlePage(body, env), 200, cors);
       if (pathname === "/ia") return streamedJson(() => handleAi(body, env), cors, ctx);
       if (pathname === "/voix") return json(await handleVoice(body, env), 200, cors);
-      if (pathname === "/liens") return json(await handleLinks(body), 200, cors);
+      if (pathname === "/liens") return json(await handleLinks(body, env), 200, cors);
       if (pathname === "/apercus") return json(await handleApercus(body), 200, cors);
       if (pathname === "/photo") return streamedJson(() => handlePhoto(body, env), cors, ctx);
       throw new RelayError("NOT_FOUND", "Route inconnue.", 404);
