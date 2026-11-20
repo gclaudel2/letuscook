@@ -5,7 +5,7 @@
  * - Les recettes elles-mêmes sont dans IndexedDB (pas ici)
  * Changer VERSION à chaque mise en ligne d'une nouvelle version force le renouvellement du cache.
  */
-const VERSION = "zbc-2.11.0"; // = APP_VERSION dans index.html
+const VERSION = "zbc-2.12.0"; // = APP_VERSION dans index.html
 const IMAGE_CACHE = "zbc-images";
 const FONT_CACHE = "zbc-fonts"; // polices des thèmes (Google Fonts) et module de lecture des photos, gardés pour le hors ligne
 const MAX_IMAGES = 200;

@@ -1449,27 +1449,20 @@
     { id: "gm-fr", name: "Gault&Millau", host: "fr.gaultmillau.com", maxPages: 40,
       page: (n) => (n === 1 ? "https://fr.gaultmillau.com/fr/collections/recettes" : `https://fr.gaultmillau.com/fr/collections/recettes?page=${n}`),
       motif: "^/fr/news/[\\w-]+$" },
-    { id: "michelin", name: "Guide Michelin", host: "guide.michelin.com", maxPages: 40,
-      page: (n) => (n === 1 ? "https://guide.michelin.com/fr/fr/articles/dining-in" : `https://guide.michelin.com/fr/fr/articles/dining-in/page/${n}`),
-      motif: "^/fr/fr/article/dining-in/[\\w.-]+$" },
     { id: "gm-ch", name: "Gault&Millau Suisse", host: "www.gaultmillau.ch", maxPages: 80,
       page: (n) => (n === 1 ? "https://www.gaultmillau.ch/fr/recettes" : `https://www.gaultmillau.ch/fr/recettes?page=${n - 1}`),
       motif: "^/fr/recettes/[\\w-]+-\\d+$" },
     { id: "lhr", name: "L'Hôtellerie Restauration", host: "www.lhotellerie-restauration.fr", maxPages: 80,
       page: (n) => (n === 1 ? "https://www.lhotellerie-restauration.fr/actualite/theme/recette" : `https://www.lhotellerie-restauration.fr/actualite/theme/recette?page=${n}`),
       motif: "^/actualite/[\\w-]+$" },
+    // Arts & Gastronomie : ~2 250 recettes de chefs, rangées par « classement » (pages WordPress /page/N/)
+    { id: "artsgastro", name: "Arts & Gastronomie", host: "www.arts-et-gastronomie.com", maxPages: 40,
+      lists: ["bistronomique", "gastronomique", "une-etoile", "deux-etoiles", "trois-etoiles"].map((k) => (n) =>
+        (n === 1 ? `https://www.arts-et-gastronomie.com/classement/${k}/` : `https://www.arts-et-gastronomie.com/classement/${k}/page/${n}/`)),
+      motif: "^/recette/[\\w-]+/?$" },
     { id: "lefooding", name: "Le Fooding", host: "lefooding.com", maxPages: 60,
       page: (n) => (n === 1 ? "https://lefooding.com/recettes/" : `https://lefooding.com/recettes/?page=${n}`),
       motif: "^/recettes/[\\w-]+/?$" },
-    { id: "michelin-ch", name: "Guide Michelin Suisse", host: "guide.michelin.com", maxPages: 20,
-      page: (n) => (n === 1 ? "https://guide.michelin.com/ch/fr/articles/dining-in" : `https://guide.michelin.com/ch/fr/articles/dining-in/page/${n}`),
-      motif: "^/ch/fr/article/dining-in/[\\w.-]+$" },
-    { id: "michelin-be", name: "Guide Michelin Belgique", host: "guide.michelin.com", maxPages: 20,
-      page: (n) => (n === 1 ? "https://guide.michelin.com/be/fr/articles/dining-in" : `https://guide.michelin.com/be/fr/articles/dining-in/page/${n}`),
-      motif: "^/be/fr/article/dining-in/[\\w.-]+$" },
-    { id: "michelin-en", name: "Guide Michelin (international, en anglais)", host: "guide.michelin.com", maxPages: 30,
-      page: (n) => (n === 1 ? "https://guide.michelin.com/en/articles/dining-in" : `https://guide.michelin.com/en/articles/dining-in/page/${n}`),
-      motif: "^/en/article/dining-in/[\\w.-]+$" },
     { id: "doitinparis", name: "Do It in Paris (chefs)", host: "www.doitinparis.com", maxPages: 1,
       page: () => "https://www.doitinparis.com/fr/recettes/recettes-de-chefs",
       motif: "^/fr/[\\w-]+-\\d+$" },
@@ -1509,8 +1502,8 @@
 
   /** Liens de recettes d'une page de liste : via /liens (léger), sinon via /page (relais ancien). */
   let linksRouteMissing = false; // relais pas encore mis à jour : inutile de retenter /liens
-  async function catalogPageLinks(cat, n) {
-    const url = cat.page(n);
+  async function catalogPageLinks(cat, n, page = cat.page) {
+    const url = page(n);
     try {
       if (linksRouteMissing) throw new ExtractError("NOT_FOUND", "");
       const res = await callWorker("/liens", { url, motif: cat.motif });
@@ -1539,24 +1532,29 @@
 
   async function indexCatalog(cat, onProgress) {
     const items = new Map();
-    let emptyStreak = 0;
-    for (let n = 1; n <= cat.maxPages; n++) {
-      let links;
-      try { links = await catalogPageLinks(cat, n); } catch (err) {
-        if (n === 1) throw err;
-        break; // fin de la pagination (404) ou site indisponible : on garde ce qu'on a
+    const lists = cat.lists || [cat.page]; // une source peut avoir plusieurs listes (catégories)
+    let firstError = null, pagesRead = 0;
+    for (const page of lists) {
+      let emptyStreak = 0;
+      for (let n = 1; n <= cat.maxPages; n++) {
+        let links;
+        try { links = await catalogPageLinks(cat, n, page); pagesRead++; } catch (err) {
+          if (n === 1) { firstError = firstError || err; }
+          break; // fin de la pagination (404) ou liste indisponible : on garde ce qu'on a
+        }
+        if (n === 1 && !links.length) break;
+        let added = 0;
+        for (const l of links) {
+          if (!items.has(l.u)) { items.set(l.u, { u: l.u, t: l.t || titleFromSlug(new URL(l.u).pathname), i: l.i || "" }); added++; }
+          else if (l.i && !items.get(l.u).i) items.get(l.u).i = l.i;
+        }
+        onProgress(cat, pagesRead, items.size);
+        emptyStreak = added ? 0 : emptyStreak + 1;
+        if (emptyStreak >= 2) break; // plus rien de nouveau : dernière page atteinte
       }
-      if (n === 1 && !links.length) {
-        throw new ExtractError("NO_LINKS", "Aucune recette trouvée sur sa page de liste (site protégé ou modifié). Mettez le relais à jour, puis réessayez.");
-      }
-      let added = 0;
-      for (const l of links) {
-        if (!items.has(l.u)) { items.set(l.u, { u: l.u, t: l.t || titleFromSlug(new URL(l.u).pathname), i: l.i || "" }); added++; }
-        else if (l.i && !items.get(l.u).i) items.get(l.u).i = l.i;
-      }
-      onProgress(cat, n, items.size);
-      emptyStreak = added ? 0 : emptyStreak + 1;
-      if (emptyStreak >= 2) break; // plus rien de nouveau : dernière page atteinte
+    }
+    if (!items.size) {
+      throw firstError || new ExtractError("NO_LINKS", "Aucune recette trouvée sur sa page de liste (site protégé ou modifié). Mettez le relais à jour, puis réessayez.");
     }
     return [...items.values()];
   }
