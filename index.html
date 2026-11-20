@@ -273,6 +273,7 @@
   .photo-block .or::before, .photo-block .or::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
   .photo-btn { width: 100%; }
   #chef-index .sync-btn { flex: none; width: 44px; height: 44px; margin-left: auto; color: var(--accent); }
+  #chef-index .sync-btn + .sync-btn { margin-left: 0; color: var(--muted); }
   #chef-index .sync-btn svg { width: 20px; height: 20px; }
   #chef-index .sync-btn .spinner { width: 18px; height: 18px; }
   .photo-mode { margin-bottom: 10px; }
@@ -627,14 +628,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.12.0"></script>
-<script src="extracteur.js?v=2.12.0"></script>
+<script src="config.js?v=2.13.0"></script>
+<script src="extracteur.js?v=2.13.0"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.12.0";
+const APP_VERSION = "2.13.0";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -663,6 +664,7 @@ const ICONS = {
   sun: "M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10zM12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4",
   bookmark: "M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z",
   check: "M20 6L9 17l-5-5",
+  trash: "M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6",
   refresh: "M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15",
   camera: "M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2zM12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z",
   paste: "M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2M9 2h6v4H9z",
@@ -2315,7 +2317,7 @@ function siteEditor(site) {
 }
 
 /* ════════════ Index des recettes de chefs ════════════ */
-const chefIndexUI = { running: false, progress: "", only: null };
+const chefIndexUI = { running: false, progress: "", only: null, adding: false, found: null, msg: "", url: "" };
 
 function formatDate(ts) {
   if (!ts) return "jamais";
@@ -2344,17 +2346,67 @@ function renderChefIndex() {
       "aria-label": `Mettre à jour ${src.name}`, title: `Mettre à jour ${src.name}`,
       onclick: () => runChefIndex(true, src.id),
     }, mine ? h("span", { class: "spinner", "aria-hidden": "true" }) : icon("refresh"));
+    const del = src.custom && h("button", {
+      type: "button", class: "icon-btn sync-btn", disabled: chefIndexUI.running,
+      "aria-label": `Supprimer ${src.name}`, title: `Supprimer ${src.name}`,
+      onclick: () => {
+        if (!confirm(`Supprimer la source « ${src.name} » et ses recettes indexées ?`)) return;
+        ZBC.removeChefSource(src.id);
+        renderChefIndex();
+      },
+    }, icon("trash"));
     return h("li", { class: `site${src.enabled ? "" : " off"}` },
       h("label", { class: "switch" }, toggle, h("span", { class: "slider", "aria-hidden": "true" })),
       h("div", { class: "site-info" }, h("strong", {}, src.name), h("small", {}, detail)),
-      sync);
+      sync, del);
   });
   box.replaceChildren(
-    h("ul", { class: "sites" }, rows),
+    h("ul", { class: "sites" }, rows, chefIndexUI.adding && chefSourceEditor()),
     h("p", { class: "site-test", "aria-live": "polite" }, chefIndexUI.running ? chefIndexUI.progress || "Mise à jour…" : `${total} recettes de chefs disponibles hors recherche`),
     h("button", { type: "button", class: "btn add-site", disabled: chefIndexUI.running, onclick: () => runChefIndex(true) },
       chefIndexUI.running ? [h("span", { class: "spinner", "aria-hidden": "true" }), "Mise à jour en cours…"] : "Mettre à jour maintenant"),
+    !chefIndexUI.adding && h("button", { type: "button", class: "btn add-site", disabled: chefIndexUI.running,
+      onclick: () => { chefIndexUI.adding = true; chefIndexUI.found = null; chefIndexUI.msg = ""; renderChefIndex(); } }, "+ Ajouter un site de chef"),
   );
+}
+
+/** Ajout d'une source : l'utilisateur donne une page qui liste des recettes, l'appli trouve le reste. */
+function chefSourceEditor() {
+  const url = h("input", { class: "input small", placeholder: "Page qui liste des recettes (ex. https://site.fr/recettes/)", value: chefIndexUI.url || "", inputmode: "url", autocapitalize: "off", spellcheck: "false" });
+  const name = h("input", { class: "input small", placeholder: "Nom (facultatif)", value: chefIndexUI.found ? chefIndexUI.found.name : "" });
+  [url, name].forEach((el) => el.addEventListener("keydown", (e) => { if (e.key === "Enter") e.preventDefault(); }));
+  const line = h("p", { class: "site-test", "aria-live": "polite" }, chefIndexUI.msg || "");
+  const found = chefIndexUI.found;
+  const analyse = h("button", { type: "button", class: "btn small", onclick: async (e) => {
+    chefIndexUI.url = url.value.trim();
+    if (!chefIndexUI.url) { line.textContent = "Collez l'adresse d'une page du site qui liste des recettes."; return; }
+    e.currentTarget.disabled = true;
+    line.textContent = "Analyse de la page…";
+    try {
+      const f = await ZBC.detectChefSource(chefIndexUI.url);
+      chefIndexUI.found = f;
+      chefIndexUI.msg = `✓ ${f.count} recettes sur cette page (ex. « ${f.sample.join(" », « ")} »)${f.paging === "none" ? " · une seule page" : " · pages suivantes trouvées"}`;
+    } catch (err) {
+      chefIndexUI.found = null;
+      chefIndexUI.msg = `✕ ${err.message}`;
+    }
+    renderChefIndex();
+  } }, "Analyser");
+  const add = found && h("button", { type: "button", class: "btn small", onclick: () => {
+    const id = ZBC.addChefSource({ ...found, name: name.value.trim() || found.name });
+    Object.assign(chefIndexUI, { adding: false, found: null, msg: "", url: "" });
+    renderChefIndex();
+    runChefIndex(true, id);
+  } }, "Ajouter et indexer");
+  return h("li", { class: "site editing" },
+    h("div", { class: "site-form" },
+      h("strong", {}, "Nouveau site de chef"),
+      url, found && name,
+      h("p", { class: "site-help" }, "Ouvrez le site dans Safari, allez sur une page qui liste des recettes (une catégorie, « toutes les recettes »…), copiez son adresse et collez-la ici. L'appli trouve seule les liens de recettes et les pages suivantes."),
+      line,
+      h("div", { class: "site-actions" },
+        analyse, add,
+        h("button", { type: "button", class: "btn small", onclick: () => { Object.assign(chefIndexUI, { adding: false, found: null, msg: "", url: "" }); renderChefIndex(); } }, "Annuler"))));
 }
 
 async function runChefIndex(force, only = null) {

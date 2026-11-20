@@ -1460,6 +1460,11 @@
       lists: ["bistronomique", "gastronomique", "une-etoile", "deux-etoiles", "trois-etoiles"].map((k) => (n) =>
         (n === 1 ? `https://www.arts-et-gastronomie.com/classement/${k}/` : `https://www.arts-et-gastronomie.com/classement/${k}/page/${n}/`)),
       motif: "^/recette/[\\w-]+/?$" },
+    // AFTouch Cuisine : ~3 000 recettes créées ou corrigées par un chef étoilé (Patrick Asfaux), 24 par page
+    { id: "aftouch", name: "AFTouch Cuisine", host: "aftouch-cuisine.com", maxPages: 40,
+      lists: ["entrees", "viandes", "poissons-crustaces", "plats", "desserts", "sauces", "legumes"].map((k) => (n) =>
+        (n === 1 ? `https://aftouch-cuisine.com/category/${k}` : `https://aftouch-cuisine.com/category/${k}?page=${n}`)),
+      motif: "^/recette/[\\w-]+-\\d+\\.html$" },
     { id: "lefooding", name: "Le Fooding", host: "lefooding.com", maxPages: 60,
       page: (n) => (n === 1 ? "https://lefooding.com/recettes/" : `https://lefooding.com/recettes/?page=${n}`),
       motif: "^/recettes/[\\w-]+/?$" },
@@ -1489,12 +1494,83 @@
     try { localStorage.setItem(CHEF_SOURCES_OFF_KEY, JSON.stringify([...off])); } catch { /* */ }
   }
   /** État de l'index, pour les Réglages. */
+  // ── Sources de chefs ajoutées par l'utilisateur (Réglages) ──
+  const CHEF_CUSTOM_KEY = "zbc.chefCustom";
+  function customChefSources() {
+    try { const v = JSON.parse(localStorage.getItem(CHEF_CUSTOM_KEY)); return Array.isArray(v) ? v : []; } catch { return []; }
+  }
+  function customToCatalog(c) {
+    const page = (n) => {
+      if (n === 1) return c.url;
+      const u = new URL(c.url);
+      if (c.paging === "query") { u.searchParams.set(c.param || "page", String(n)); return u.toString(); }
+      u.pathname = u.pathname.replace(/\/?$/, `/page/${n}/`); // c.paging === "path"
+      return u.toString();
+    };
+    return { id: c.id, name: c.name, host: c.host, maxPages: c.paging === "none" ? 1 : 40, page, motif: c.motif, custom: true };
+  }
+  const allChefCatalogs = () => [...CHEF_CATALOGS, ...customChefSources().map(customToCatalog)];
+
+  /**
+   * Analyse une page de liste de recettes choisie par l'utilisateur : trouve la forme de ses liens de
+   * recettes (le groupe de liens le plus nombreux du même site) et la façon de passer à la page 2.
+   */
+  async function detectChefSource(input) {
+    const url = parseTargetUrl(input);
+    const page = await callWorker("/page", { url });
+    const base = new URL(page.finalUrl || url);
+    const doc = new DOMParser().parseFromString(page.html, "text/html");
+    const groups = new Map();
+    let paging = "none", param = "page";
+    doc.querySelectorAll("a[href]").forEach((a) => {
+      let u; try { u = new URL(a.getAttribute("href"), base); } catch { return; }
+      if (u.hostname !== base.hostname) return;
+      const pm = /[?&]((?:p|pg|page|paged))=2(?:&|$)/i.exec(u.search);
+      if (pm && paging === "none") { paging = "query"; param = pm[1]; }
+      if (/\/page\/2\/?$/.test(u.pathname) && paging === "none") paging = "path";
+      const m = /^(.*\/)([^/]+?)(\.html?)?(\/?)$/.exec(u.pathname);
+      if (!m) return;
+      const [, prefix, slug, ext = "", slash] = m;
+      if (!slug.includes("-") || slug.length < 8 || prefix === "/" && !ext) return; // un titre de recette en « slug »
+      const key = `${prefix}*${ext}`;
+      u.search = ""; u.hash = "";
+      const g = groups.get(key) || { prefix, ext, slash, items: new Map() };
+      const t = normSpace(a.textContent).slice(0, 160);
+      const prev = g.items.get(u.toString()) || { u: u.toString(), t: "", i: "" };
+      prev.t = prev.t || t; prev.i = prev.i || imageFromElement(a, base.toString());
+      g.items.set(u.toString(), prev);
+      groups.set(key, g);
+    });
+    const best = [...groups.values()].sort((a, b) => b.items.size - a.items.size)[0];
+    if (!best || best.items.size < 4) throw new ExtractError("NO_LINKS", "Je ne trouve pas de liste de recettes sur cette page. Donnez l'adresse d'une page qui liste des recettes (catégorie, « toutes les recettes »…).");
+    const esc = (x) => x.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+    const motif = `^${esc(best.prefix)}[\\w.%-]+${best.ext ? esc(best.ext) : "/?"}$`;
+    const siteName = normSpace((doc.querySelector('meta[property="og:site_name"]') || {}).content || "")
+      || base.hostname.replace(/^www\./, "");
+    const items = [...best.items.values()];
+    return { name: siteName.slice(0, 60), host: base.hostname, url: base.toString(), paging, param, motif, count: items.length,
+      sample: items.slice(0, 3).map((x) => x.t || titleFromSlug(new URL(x.u).pathname)) };
+  }
+  function addChefSource(src) {
+    const list = customChefSources();
+    const id = `u-${Date.now().toString(36)}`;
+    list.push({ id, name: src.name, host: src.host, url: src.url, paging: src.paging, param: src.param, motif: src.motif });
+    localStorage.setItem(CHEF_CUSTOM_KEY, JSON.stringify(list));
+    return id;
+  }
+  function removeChefSource(id) {
+    localStorage.setItem(CHEF_CUSTOM_KEY, JSON.stringify(customChefSources().filter((c) => c.id !== id)));
+    const idx = readChefIndex();
+    delete idx.sites[id];
+    writeChefIndex(idx);
+  }
+
   function chefIndexStatus() {
     const idx = readChefIndex();
     const off = chefSourcesOff();
-    return CHEF_CATALOGS.map((c) => {
+    return allChefCatalogs().map((c) => {
       const e = idx.sites[c.id];
-      return { id: c.id, name: c.name, host: c.host, enabled: !off.includes(c.id), count: e ? e.items.length : 0, at: e ? e.at : 0, error: e ? e.error || "" : "" };
+      return { id: c.id, name: c.name, host: c.host, custom: !!c.custom, enabled: !off.includes(c.id), count: e ? e.items.length : 0, at: e ? e.at : 0, error: e ? e.error || "" : "" };
     });
   }
 
@@ -1569,8 +1645,8 @@
       const idx = readChefIndex();
       const off = chefSourcesOff();
       const todo = only
-        ? CHEF_CATALOGS.filter((c) => c.id === only) // une seule source, à la demande (bouton de sa ligne)
-        : CHEF_CATALOGS.filter((c) => !off.includes(c.id) && (force || !idx.sites[c.id] || Date.now() - idx.sites[c.id].at > INDEX_MAX_AGE || idx.sites[c.id].error));
+        ? allChefCatalogs().filter((c) => c.id === only) // une seule source, à la demande (bouton de sa ligne)
+        : allChefCatalogs().filter((c) => !off.includes(c.id) && (force || !idx.sites[c.id] || Date.now() - idx.sites[c.id].at > INDEX_MAX_AGE || idx.sites[c.id].error));
       let done = 0;
       // 2 sources à la fois : rapide sans surcharger le relais
       const queue = todo.slice();
@@ -1597,7 +1673,7 @@
   }
   const chefIndexStale = () => {
     const idx = readChefIndex(); const off = chefSourcesOff();
-    return CHEF_CATALOGS.some((c) => !off.includes(c.id) && (!idx.sites[c.id] || Date.now() - idx.sites[c.id].at > INDEX_MAX_AGE));
+    return allChefCatalogs().some((c) => !off.includes(c.id) && (!idx.sites[c.id] || Date.now() - idx.sites[c.id].at > INDEX_MAX_AGE));
   };
 
   // ── Photos des recettes : cache local + aperçus groupés par le relais ──
@@ -1645,7 +1721,7 @@
   function searchChefIndex(words, perSource = 4) {
     const idx = readChefIndex();
     const off = chefSourcesOff();
-    return CHEF_CATALOGS.filter((c) => !off.includes(c.id) && idx.sites[c.id]).map((c) =>
+    return allChefCatalogs().filter((c) => !off.includes(c.id) && idx.sites[c.id]).map((c) =>
       idx.sites[c.id].items
         .filter((it) => matchesQuery(`${it.t} ${new URL(it.u).pathname}`, words))
         .slice(0, perSource)
@@ -1708,7 +1784,7 @@
 
   window.ZBC = {
     CONFIG, ACCESS_CODE_KEY, WORKER_URL_KEY, getWorkerUrl, ExtractError,
-    extractRecipe, extractFromHtml, parseTargetUrl, searchRecipes, readPhotos, recipeFromText, photosToRecipeAI, analyzeUrl, previewImages, rememberImage, cachedImage, synthesize, refreshChefIndex, chefIndexStatus, chefIndexStale, setChefSourceEnabled, CHEF_CATALOGS, getSearchSites, saveSearchSites, resetSearchSites, rememberRemovedSite, normalizeHost, testSearchSite, DEFAULT_SEARCH_SITES,
+    extractRecipe, extractFromHtml, parseTargetUrl, searchRecipes, readPhotos, recipeFromText, photosToRecipeAI, analyzeUrl, previewImages, rememberImage, cachedImage, synthesize, refreshChefIndex, chefIndexStatus, chefIndexStale, setChefSourceEnabled, CHEF_CATALOGS, detectChefSource, addChefSource, removeChefSource, getSearchSites, saveSearchSites, resetSearchSites, rememberRemovedSite, normalizeHost, testSearchSite, DEFAULT_SEARCH_SITES,
     parseIngredient, formatIngredient, formatQuantity, parseDuration, parseServings,
   };
 })();
