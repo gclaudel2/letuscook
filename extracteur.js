@@ -452,6 +452,8 @@
     "#comments", ".comments", ".comment-list", "#respond",
     ".adsbygoogle", ".advertisement", ".advert", ".ads", ".ad", '[id^="ad-"]', '[class^="ad-"]', '[id*="google_ads"]',
     ".share", ".sharing", ".social", ".newsletter", ".related", ".related-posts", ".breadcrumb", ".sidebar",
+    '[class*="breadcrumb" i]', '[id*="breadcrumb" i]', '[class*="ariane" i]', '[aria-label*="breadcrumb" i]', '[aria-label*="fil d" i]',
+    '[itemtype*="BreadcrumbList"]', '[class*="newsletter" i]', '[id*="newsletter" i]',
     '[class*="cookie"]', '[class*="popup"]', '[class*="modal"]',
   ].join(",");
 
@@ -581,7 +583,8 @@
         const lis = [...el.children].filter((c) => c.tagName === "LI");
         if (!lis.length || linkRatio(el) > 0.6) continue;
         const texts = lis.map((li) => normSpace(li.textContent)).filter(Boolean);
-        entries.push({ kind: "list", ordered: tag === "OL", texts, section, step: afterStepHeading });
+        const linkedItems = lis.filter((li) => linkRatio(li) > 0.5).length; // fil d'Ariane, « à lire aussi »…
+        entries.push({ kind: "list", ordered: tag === "OL", texts, section, step: afterStepHeading, links: linkedItems / lis.length });
         continue;
       }
       // Intertitre sans deux-points : paragraphe court entièrement en gras, ou "Ingrédients pour 4 personnes", "Préparation"…
@@ -600,8 +603,11 @@
         entries.push({ kind: "heading", text: t, step: isStep });
         continue;
       }
+      const emText = normSpace([...el.querySelectorAll("em, i")].map((x) => x.textContent).join(" "));
+      const italic = !!emText && emText.length >= whole.length * 0.8; // crédit du livre, légende…
       for (const line of lines) {
         const c = classifyLine(line, false);
+        c.italic = italic;
         if (c.kind === "label") {
           const isStepLabel = STEP_HEADING.test(c.label) && !ING_HEADING.test(c.label);
           afterStepHeading = isStepLabel;
@@ -637,8 +643,11 @@
 
     // 3. Étapes : listes numérotées de phrases…
     let steps = [];
-    for (const e of entries) {
+    const firstIng = entries.findIndex((e) => e.kind === "ing" || (e.kind === "list" && !e.step && e.texts.filter((t) => classifyLine(t, true).kind === "ing").length >= 2));
+    for (const [idx, e] of entries.entries()) {
       if (e.kind !== "list" || (!e.ordered && !e.step)) continue;
+      if (e.links > 0.5) continue;                                  // liste de liens (fil d'Ariane…)
+      if (!e.step && firstIng >= 0 && idx < firstIng) continue;    // liste numérotée AVANT les ingrédients : pas la préparation
       const avg = e.texts.reduce((n, t) => n + t.length, 0) / e.texts.length;
       const qtyRatio = e.texts.filter((t) => classifyLine(t, true).kind === "ing").length / e.texts.length;
       if (e.texts.length >= 2 && avg >= 25 && qtyRatio < 0.5) {
@@ -665,9 +674,14 @@
     }
     // … sinon paragraphes sous un titre "Préparation"
     if (steps.length < 2) {
-      steps = entries
-        .filter((e) => e.step && e.kind !== "heading" && e.kind !== "list" && e.text && e.text.length >= 20)
-        .map((e) => ({ text: e.text.replace(STEP_NUMBERING, "").trim() }));
+      // On s'arrête au premier texte qui n'est plus la recette (crédit du livre en italique, « Découvrez aussi », signature…)
+      const END = /^(?:d[ée]couvre[zr]?|[àa] lire|lire aussi|voir aussi|retrouve[zr]?|[ée]crit par|par la r[ée]daction|cr[ée]dits?|photos?\s*:|©|source\s*:|recette (?:extraite|issue|tir[ée]e)|extrait d)/i;
+      steps = [];
+      for (const e of entries) {
+        if (!e.step || e.kind === "heading" || e.kind === "list" || !e.text || e.text.length < 20) continue;
+        if (END.test(e.text) || e.italic || /\d\s*€|€\s*\d|[ée]d(?:\.|itions?)\s+[A-Z]/.test(e.text)) { if (steps.length >= 2) break; continue; }
+        steps.push({ text: e.text.replace(STEP_NUMBERING, "").trim() });
+      }
     }
 
     if (ingredients.length < 2 || steps.length < 2) return null;
