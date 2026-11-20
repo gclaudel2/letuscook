@@ -831,17 +831,24 @@
     let res;
     // Un essai par appel au relais (< 1 min chacun). Texte de livre refusé → étapes résumées ;
     // trop lent ou saturé → modèle « lite », plus rapide. 4 essais au plus.
-    let mode = "normal", model = "main";
+    // On commence par la combinaison qui a marché la dernière fois (au tout début : étapes résumées + modèle rapide,
+    // le plus sûr pour une page de livre). Mémorisée après chaque réussite.
+    let { mode, model } = (() => {
+      try { const v = JSON.parse(localStorage.getItem("zbc.photoAI")); if (v && v.mode && v.model) return v; } catch { /* */ }
+      return { mode: "compact", model: "lite" };
+    })();
     for (let n = 1; n <= 4; n++) {
-      if (n > 1) log(`Essai ${n} : ${mode === "compact" ? "étapes résumées" : "lecture normale"}, modèle ${model === "lite" ? "rapide" : "principal"}…`, "run");
+      log(`Essai ${n} : ${mode === "compact" ? "étapes résumées" : "lecture mot à mot"}, modèle ${model === "lite" ? "rapide" : "principal"}…`, "run");
       try {
         res = await callWorker("/photo", { images, mode, model });
+        try { localStorage.setItem("zbc.photoAI", JSON.stringify({ mode, model })); } catch { /* */ }
         break;
       } catch (err) {
         if (err.code === "NOT_FOUND") err.message = "Le relais n'est pas à jour : recollez le fichier relais.js dans Cloudflare pour activer la lecture des photos par l'IA.";
         const slow = ["LLM_TIMEOUT", "LLM_BUSY", "RELAY_CUT"].includes(err.code);
         if (n < 4 && err.code === "RECITATION" && mode === "normal") { log("Gemini refuse de recopier un texte de livre", "warn"); mode = "compact"; continue; }
-        if (n < 4 && slow && model === "main") { log(err.code === "LLM_BUSY" ? "Gemini saturé" : "Gemini trop lent", "warn"); model = "lite"; continue; }
+        if (n < 4 && slow) { log(err.code === "LLM_BUSY" ? "Gemini saturé" : "Gemini trop lent", "warn"); model = model === "lite" ? "main" : "lite"; continue; }
+        if (n < 4 && err.code === "LLM_FAILED" && model === "lite") { log("Le modèle rapide n'a pas su lire la photo", "warn"); model = "main"; continue; }
         log(err.message, "error");
         throw err;
       }
