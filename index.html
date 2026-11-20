@@ -272,12 +272,18 @@
   .photo-block .or { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; color: var(--muted); font-size: 14px; }
   .photo-block .or::before, .photo-block .or::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
   .photo-btn { width: 100%; }
+  .history-head { display: flex; align-items: baseline; justify-content: space-between; margin: 22px 2px 10px; }
+  .history-head h3 { margin: 0; font: var(--head-w) 20px/1.2 var(--head); }
+  .link-btn { border: 0; background: none; color: var(--muted); font-size: 14px; padding: 8px 4px; min-height: 36px; }
+  .history-searches .filter { display: inline-flex; align-items: center; gap: 6px; }
+  .history-searches .filter svg { width: 14px; height: 14px; opacity: 0.7; }
+  .recent-views .r-thumb { width: 64px; height: 64px; }
   .browse-chefs { width: 100%; margin-top: 14px; gap: 10px; text-decoration: none; color: var(--ink); }
   .chef-tools { display: flex; flex-direction: column; gap: 10px; margin: 12px 0 4px; }
   .more-chefs { width: 100%; margin-top: 12px; }
   #chef-list .list-head { margin: 14px 2px 0; font: var(--head-w) 20px/1.2 var(--head); color: var(--ink); }
   #chef-list .list-head:first-child { margin-top: 0; }
-  .tab { min-width: 0; padding: 0 4px; }
+  .tab { min-width: 0; padding: 0 4px; font-size: 15px; white-space: nowrap; }
   #chef-index .sync-btn { flex: none; width: 44px; height: 44px; margin-left: auto; color: var(--accent); }
   #chef-index .sync-btn + .sync-btn { margin-left: 0; color: var(--muted); }
   #chef-index .sync-btn svg { width: 20px; height: 20px; }
@@ -634,14 +640,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.15.1"></script>
-<script src="extracteur.js?v=2.15.1"></script>
+<script src="config.js?v=2.16.0"></script>
+<script src="extracteur.js?v=2.16.0"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.15.1";
+const APP_VERSION = "2.16.0";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1371,9 +1377,9 @@ function renderHome() {
   const tabs = h("div", { class: "tabs", role: "tablist", "aria-label": "Sections" },
     h("button", { class: "tab", role: "tab", "aria-selected": String(state.tab === "recherche"), onclick: () => go("#/") }, "Chercher"),
     h("button", { class: "tab", role: "tab", "aria-selected": String(state.tab === "extraire"), onclick: () => go("#/lien") }, "Lien"),
+    h("button", { class: "tab", role: "tab", "aria-selected": String(state.tab === "chefs"), onclick: () => go("#/chefs") }, "Explorer"),
     h("button", { class: "tab", role: "tab", "aria-selected": String(state.tab === "carnet"), onclick: () => go("#/carnet") },
       "Carnet ", h("span", { class: "count" }, state.recipes.length ? `· ${state.recipes.length}` : "")),
-    h("button", { class: "tab", role: "tab", "aria-selected": String(state.tab === "chefs"), onclick: () => go("#/chefs") }, "Explorer"),
   );
 
   const compact = state.tab === "recherche" && (state.search.results.length > 0 || state.search.loading);
@@ -1636,7 +1642,10 @@ function renderSearchPanel() {
     if (S.sources.length) parts.push(h("div", { class: "sources" }, sourcesText()));
     parts.push(renderSearchControls());
     parts.push(h("ul", { class: "results", id: "results" }, visibleResults().map(resultCard)));
-  } else if (!S.loading && !S.error) {
+  } else if (!S.loading) {
+    parts.push(...renderHistory());
+  }
+  if (!S.results.length && !S.loading && !S.error) {
     const nSites = enabledSites().length, nChefs = ZBC.chefIndexCount();
     parts.push(h("p", { class: "hint" }, nSites
       ? `Recherche sur ${nSites} sites de cuisine${nChefs ? ` et ${nChefs} recettes de chefs` : ""} (liste dans les Réglages). Comparez temps, difficulté et notes d'un coup d'œil, puis ouvrez la recette en mode cuisine.`
@@ -1785,6 +1794,7 @@ async function runSearch(raw) {
   const q = String(raw || "").trim();
   if (q.length < 2) { S.error = "Tapez au moins 2 lettres."; return renderHome(); }
   const id = ++S.id;
+  rememberSearch(q);
   Object.assign(S, { q, loading: true, error: "", results: [], sources: [], scrollY: 0 });
   renderHome();
   document.activeElement?.blur(); // ferme le clavier
@@ -1865,6 +1875,67 @@ function openResult(res) {
   // Sinon : extraction complète (avec l'IA si besoin), journal visible dans l'onglet Lien
   go("#/lien");
   runExtraction(res.url);
+}
+
+/* ════════════ Historique : dernières recherches et recettes vues ════════════ */
+const RECENT_SEARCHES = "zbc.recentSearches";
+const RECENT_VIEWS = "zbc.recentViews";
+
+function rememberSearch(q) {
+  const list = store.get(RECENT_SEARCHES, []).filter((x) => x.toLowerCase() !== q.toLowerCase());
+  store.set(RECENT_SEARCHES, [q, ...list].slice(0, 5));
+}
+
+/** Recette ouverte → en tête des « dernières recettes vues » (copie gardée si elle n'est pas dans le carnet). */
+function rememberView(recipe, saved) {
+  const key = recipe.sourceUrl || recipe.id || recipe.title;
+  if (!key) return;
+  const entry = {
+    key, title: recipe.title, site: recipe.siteName || "", image: recipe.image || "",
+    savedId: saved ? recipe.id : undefined, at: Date.now(),
+    recipe: saved ? undefined : { ...recipe },
+  };
+  if (entry.recipe && JSON.stringify(entry.recipe).length > 150000) entry.recipe = undefined; // trop lourde (photo) : on la rouvrira par son lien
+  const list = store.get(RECENT_VIEWS, []).filter((x) => x.key !== key);
+  store.set(RECENT_VIEWS, [entry, ...list].slice(0, 10));
+}
+
+function openRecentView(v) {
+  const saved = (v.savedId && state.recipes.find((r) => r.id === v.savedId)) || (v.key && findBySource(v.key));
+  if (saved) return go(`#/r/${encodeURIComponent(saved.id)}`);
+  if (v.recipe) {
+    state.preview = { ...v.recipe };
+    state.previewWarnings = [];
+    store.del("zbc.progress.apercu");
+    state.returnTo = "";
+    return go("#/apercu");
+  }
+  if (/^https?:/.test(v.key)) openResult({ url: v.key, title: v.title, image: v.image, site: v.site, status: "pending" });
+}
+
+function renderHistory() {
+  const searches = store.get(RECENT_SEARCHES, []);
+  const views = store.get(RECENT_VIEWS, []);
+  const out = [];
+  if (searches.length) {
+    out.push(h("div", { class: "history-head" }, h("h3", {}, "Recherches récentes"),
+      h("button", { type: "button", class: "link-btn", onclick: () => { store.del(RECENT_SEARCHES); renderHome(); } }, "Effacer")));
+    out.push(h("div", { class: "filters history-searches" }, searches.map((q) =>
+      h("button", { type: "button", class: "filter", onclick: () => runSearch(q) }, icon("search"), q))));
+  }
+  if (views.length) {
+    out.push(h("div", { class: "history-head" }, h("h3", {}, "Recettes vues récemment"),
+      h("button", { type: "button", class: "link-btn", onclick: () => { store.del(RECENT_VIEWS); renderHome(); } }, "Effacer")));
+    out.push(h("ul", { class: "results recent-views" }, views.map((v) => h("li", {},
+      h("button", { class: "result", type: "button", onclick: () => openRecentView(v) },
+        thumbWithImage("r-thumb", safeImageUrl(v.image), (v.title || "?").trim().charAt(0).toUpperCase()),
+        h("div", { class: "r-body" },
+          h("div", { class: "r-name" }, v.title),
+          h("div", { class: "r-meta" }, h("span", {}, v.site || "Recette"),
+            v.savedId && h("span", { class: "badge" }, "Dans le carnet"),
+            h("span", {}, formatDate(v.at)))))))));
+  }
+  return out;
 }
 
 /* ════════════ Onglet « Explorer » : parcourir les recettes de chefs indexées ════════════ */
@@ -2035,6 +2106,7 @@ function quantityLabel(ing, factor) {
 }
 
 function renderRecipe(recipe, { saved }) {
+  rememberView(recipe, saved);
   const progressKey = `zbc.progress.${saved ? recipe.id : "apercu"}`;
   const progress = store.get(progressKey, {});
   const checked = new Set(progress.checked || []);
