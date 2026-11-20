@@ -435,6 +435,28 @@
   .shimmer.short { width: 55%; }
   @keyframes shimmer { to { background-position: -200% 0; } }
 
+  /* ── Tablette / grand écran en paysage ───────────── */
+  @media (min-width: 900px) {
+    .wrap { max-width: 1180px; padding: 0 32px; }
+    .results { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .cards { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+    .r-image { aspect-ratio: auto; height: min(42vh, 380px); }
+    .recipe-cols.two { display: grid; grid-template-columns: minmax(300px, 5fr) 7fr; gap: 40px; align-items: start; }
+    .recipe-cols.two .col-ing {
+      position: sticky; top: 72px; max-height: calc(100vh - 72px - 110px - var(--safe-bottom));
+      overflow-y: auto; overscroll-behavior: contain; padding-right: 6px;
+    }
+    .recipe-cols.two .col-steps .section-title:first-child { margin-top: 0; }
+    .cook-bar { padding-left: max(24px, calc((100vw - 1180px) / 2)); padding-right: max(24px, calc((100vw - 1180px) / 2)); }
+    .bar-center small { font-size: 14px; }
+  }
+  /* Téléphone tenu en paysage : moins d'espace perdu en hauteur */
+  @media (orientation: landscape) and (max-height: 500px) {
+    .hero { padding-top: 8px; }
+    body.has-cookbar { padding-bottom: calc(76px + var(--safe-bottom)); }
+    .nav-btn { width: 46px; height: 46px; }
+  }
+
   /* ── Barre mains libres ───────────────────────── */
   body.has-cookbar { padding-bottom: calc(96px + var(--safe-bottom)); }
   .cook-bar {
@@ -601,14 +623,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.9.1"></script>
-<script src="extracteur.js?v=2.9.1"></script>
+<script src="config.js?v=2.10.0"></script>
+<script src="extracteur.js?v=2.10.0"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.9.1";
+const APP_VERSION = "2.10.0";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -2096,15 +2118,19 @@ function renderRecipe(recipe, { saved }) {
     } }, "Supprimer"),
   );
 
+  // Deux colonnes sur tablette en paysage (ingrédients fixes à gauche, étapes à droite), une seule sur téléphone
+  const ingCol = recipe.ingredients.length ? h("div", { class: "col-ing" },
+    servingsBox,
+    resetBtn,
+    h("div", { class: "section-title" }, h("h2", {}, "Ingrédients"), ingProgress),
+    h("ul", { class: "ingredients" }, ingNodes)) : null;
+  const stepsCol = recipe.steps.length ? h("div", { class: "col-steps" },
+    stepsTitle,
+    h("p", { class: "step-hint" }, "Touchez l'étape en cours pour la repérer."),
+    h("ol", { class: "steps" }, stepNodes)) : null;
   const content = [
     ...header,
-    recipe.ingredients.length ? servingsBox : null,
-    recipe.ingredients.length ? resetBtn : null,
-    recipe.ingredients.length && h("div", { class: "section-title" }, h("h2", {}, "Ingrédients"), ingProgress),
-    recipe.ingredients.length && h("ul", { class: "ingredients" }, ingNodes),
-    recipe.steps.length && stepsTitle,
-    recipe.steps.length && h("p", { class: "step-hint" }, "Touchez l'étape en cours pour la repérer."),
-    recipe.steps.length && h("ol", { class: "steps" }, stepNodes),
+    h("div", { class: `recipe-cols${ingCol && stepsCol ? " two" : ""}` }, ingCol, stepsCol),
     footer,
   ].filter(Boolean);
 
