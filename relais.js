@@ -78,6 +78,35 @@ function corsHeaders(request) {
     : {};
 }
 
+/*
+ * Réponse « au long cours » (IA, photos) : iPhone/Safari abandonne une requête restée ~60 s sans recevoir
+ * de données. On répond donc tout de suite, on envoie une espace toutes les 8 s pour garder la connexion
+ * vivante, puis le JSON final (les espaces avant un JSON sont ignorées). Les erreurs arrivent dans ce JSON.
+ */
+function streamedJson(work, cors, ctx) {
+  const { readable, writable } = new TransformStream();
+  const writer = writable.getWriter();
+  const enc = new TextEncoder();
+  const ping = setInterval(() => { writer.write(enc.encode(" ")).catch(() => {}); }, 8000);
+  const done = (async () => {
+    let out;
+    try {
+      out = await work();
+    } catch (err) {
+      if (err instanceof RelayError) out = { ok: false, error: { code: err.code, message: err.message } };
+      else { console.error(err); out = { ok: false, error: { code: "INTERNAL", message: "Erreur inattendue du relais." } }; }
+    }
+    clearInterval(ping);
+    try { await writer.write(enc.encode(JSON.stringify(out))); await writer.close(); } catch { /* appli partie entre-temps */ }
+  })();
+  if (ctx && ctx.waitUntil) ctx.waitUntil(done);
+  writer.write(enc.encode(" ")).catch(() => {}); // premier octet tout de suite
+  return new Response(readable, {
+    status: 200,
+    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...cors },
+  });
+}
+
 function json(body, status, cors) {
   return new Response(JSON.stringify(body), {
     status,
@@ -589,7 +618,7 @@ async function handleApercus(body) {
 
 // ── Point d'entrée ───────────────────────────────────────────────
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const cors = corsHeaders(request);
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
 
@@ -607,11 +636,11 @@ export default {
       await checkAccess(request, env);
       const body = await request.json().catch(() => null);
       if (pathname === "/page") return json(await handlePage(body), 200, cors);
-      if (pathname === "/ia") return json(await handleAi(body, env), 200, cors);
+      if (pathname === "/ia") return streamedJson(() => handleAi(body, env), cors, ctx);
       if (pathname === "/voix") return json(await handleVoice(body, env), 200, cors);
       if (pathname === "/liens") return json(await handleLinks(body), 200, cors);
       if (pathname === "/apercus") return json(await handleApercus(body), 200, cors);
-      if (pathname === "/photo") return json(await handlePhoto(body, env), 200, cors);
+      if (pathname === "/photo") return streamedJson(() => handlePhoto(body, env), cors, ctx);
       throw new RelayError("NOT_FOUND", "Route inconnue.", 404);
     } catch (err) {
       if (err instanceof RelayError) return json({ ok: false, error: { code: err.code, message: err.message } }, err.status, cors);
