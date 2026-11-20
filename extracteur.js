@@ -829,17 +829,19 @@
     const kb = Math.round(images.reduce((n, b) => n + b.length * 0.75, 0) / 1024);
     log(`Lecture par l'IA (${list.length > 1 ? `${list.length} photos, ` : ""}${kb} Ko envoyés, souvent 10 à 40 s)…`, "run");
     let res;
-    // 1er essai normal ; si Gemini refuse de reprendre un texte de livre, 2e essai en résumé compact
-    for (const mode of ["normal", "compact"]) {
+    // Un essai par appel au relais (< 1 min chacun). Texte de livre refusé → étapes résumées ;
+    // trop lent ou saturé → modèle « lite », plus rapide. 4 essais au plus.
+    let mode = "normal", model = "main";
+    for (let n = 1; n <= 4; n++) {
+      if (n > 1) log(`Essai ${n} : ${mode === "compact" ? "étapes résumées" : "lecture normale"}, modèle ${model === "lite" ? "rapide" : "principal"}…`, "run");
       try {
-        res = await callWorker("/photo", { images, mode });
+        res = await callWorker("/photo", { images, mode, model });
         break;
       } catch (err) {
-        if (err.code === "RECITATION" && mode === "normal") {
-          log("Gemini refuse de recopier un texte de livre : nouvel essai, étapes résumées…", "warn");
-          continue;
-        }
         if (err.code === "NOT_FOUND") err.message = "Le relais n'est pas à jour : recollez le fichier relais.js dans Cloudflare pour activer la lecture des photos par l'IA.";
+        const slow = ["LLM_TIMEOUT", "LLM_BUSY", "RELAY_CUT"].includes(err.code);
+        if (n < 4 && err.code === "RECITATION" && mode === "normal") { log("Gemini refuse de recopier un texte de livre", "warn"); mode = "compact"; continue; }
+        if (n < 4 && slow && model === "main") { log(err.code === "LLM_BUSY" ? "Gemini saturé" : "Gemini trop lent", "warn"); model = "lite"; continue; }
         log(err.message, "error");
         throw err;
       }
