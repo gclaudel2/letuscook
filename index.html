@@ -274,8 +274,6 @@
   .photo-btn { width: 100%; }
   .browse-chefs { width: 100%; margin-top: 14px; gap: 10px; text-decoration: none; color: var(--ink); }
   .chef-tools { display: flex; flex-direction: column; gap: 10px; margin: 12px 0 4px; }
-  .chef-sort-row { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 15px; }
-  .chef-sort-row .input { flex: 1; height: 44px; }
   .more-chefs { width: 100%; margin-top: 12px; }
   #chef-list .list-head { margin: 14px 2px 0; font: var(--head-w) 20px/1.2 var(--head); color: var(--ink); }
   #chef-list .list-head:first-child { margin-top: 0; }
@@ -636,14 +634,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.15.0"></script>
-<script src="extracteur.js?v=2.15.0"></script>
+<script src="config.js?v=2.15.1"></script>
+<script src="extracteur.js?v=2.15.1"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.15.0";
+const APP_VERSION = "2.15.1";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1375,7 +1373,7 @@ function renderHome() {
     h("button", { class: "tab", role: "tab", "aria-selected": String(state.tab === "extraire"), onclick: () => go("#/lien") }, "Lien"),
     h("button", { class: "tab", role: "tab", "aria-selected": String(state.tab === "carnet"), onclick: () => go("#/carnet") },
       "Carnet ", h("span", { class: "count" }, state.recipes.length ? `· ${state.recipes.length}` : "")),
-    h("button", { class: "tab", role: "tab", "aria-selected": String(state.tab === "chefs"), onclick: () => go("#/chefs") }, "Chefs"),
+    h("button", { class: "tab", role: "tab", "aria-selected": String(state.tab === "chefs"), onclick: () => go("#/chefs") }, "Explorer"),
   );
 
   const compact = state.tab === "recherche" && (state.search.results.length > 0 || state.search.loading);
@@ -1869,9 +1867,8 @@ function openResult(res) {
   runExtraction(res.url);
 }
 
-/* ════════════ Onglet « Chefs » : parcourir les recettes de chefs indexées ════════════ */
-const chefBrowse = { source: "all", q: "", shown: 40, sort: "site", seed: 0, scrollY: 0 };
-const SORT_LABELS = { site: "Par site", title: "Par titre (A → Z)", random: "Au hasard" };
+/* ════════════ Onglet « Explorer » : parcourir les recettes de chefs indexées ════════════ */
+const chefBrowse = { source: "all", q: "", shown: 40, scrollY: 0 };
 
 function renderChefsPanel() {
   const all = ZBC.chefIndexItems();
@@ -1886,8 +1883,6 @@ function renderChefsPanel() {
     class: "input", type: "search", placeholder: "Filtrer (ex. homard, chocolat, Ducasse…)", value: chefBrowse.q,
     "aria-label": "Filtrer les recettes de chefs", enterkeyhint: "search",
   });
-  const sortSel = h("select", { class: "input small chef-sort", "aria-label": "Trier" },
-    ...Object.entries(SORT_LABELS).map(([v, label]) => h("option", { value: v, selected: chefBrowse.sort === v }, label)));
   const listBox = h("ul", { class: "results", id: "chef-list" });
   const countLine = h("p", { class: "search-status", "aria-live": "polite" });
   const more = h("button", { class: "btn more-chefs", type: "button" }, "Afficher plus");
@@ -1896,12 +1891,7 @@ function renderChefsPanel() {
     const words = ZBC.queryWords(chefBrowse.q);
     let list = all.filter((x) => chefBrowse.source === "all" || x.sourceId === chefBrowse.source);
     if (normSpaceUI(chefBrowse.q).length >= 2) list = list.filter((x) => ZBC.matchesQuery(`${x.title} ${new URL(x.url).pathname}`, words));
-    if (chefBrowse.sort === "title") list = list.slice().sort((a, b) => a.title.localeCompare(b.title, "fr"));
-    else if (chefBrowse.sort === "random") {
-      const key = (u) => { let hsh = Math.floor(chefBrowse.seed * 1e9); for (let i = 0; i < u.length; i++) hsh = (hsh * 31 + u.charCodeAt(i)) | 0; return hsh; };
-      list = list.slice().sort((a, b) => key(a.url) - key(b.url));
-    } else list = list.slice().sort((a, b) => a.site.localeCompare(b.site, "fr")); // par site (ordre du site gardé)
-    return list;
+    return list.slice().sort((a, b) => a.site.localeCompare(b.site, "fr")); // groupées par site (ordre du site gardé)
   };
   const card = (x) => h("li", {},
     h("button", { class: "result", type: "button", onclick: () => openResult({ url: x.url, title: x.title, image: x.image, site: x.site, chefSite: true, status: "pending" }) },
@@ -1910,7 +1900,6 @@ function renderChefsPanel() {
         h("div", { class: "r-name" }, x.title),
         h("div", { class: "r-meta" }, h("span", {}, x.site), h("span", { class: "badge chef" }, "Recette de chef")))));
   const items = (visible) => {
-    if (chefBrowse.sort !== "site") return visible.map(card);
     const out = []; let last = null;
     visible.forEach((x) => { if (x.site !== last) { out.push(h("li", { class: "list-head" }, x.site)); last = x.site; } out.push(card(x)); });
     return out;
@@ -1934,7 +1923,6 @@ function renderChefsPanel() {
   };
   filter.addEventListener("input", () => { chefBrowse.q = filter.value; chefBrowse.shown = 40; draw(); });
   filter.addEventListener("keydown", (e) => { if (e.key === "Enter") filter.blur(); });
-  sortSel.addEventListener("change", () => { chefBrowse.sort = sortSel.value; if (sortSel.value === "random") chefBrowse.seed = Math.random(); chefBrowse.shown = 40; draw(); });
   more.addEventListener("click", () => { chefBrowse.shown += 40; draw(); });
   const chip = (id, label) => h("button", {
     type: "button", class: "filter", "aria-pressed": String(chefBrowse.source === id),
@@ -1946,8 +1934,7 @@ function renderChefsPanel() {
   return h("section", { "aria-label": "Recettes de chefs" },
     filter,
     h("div", { class: "chef-tools" },
-      h("div", { class: "filters chef-sources" }, chip("all", "Tous les sites"), ...sources.map(([id, name]) => chip(id, name))),
-      h("label", { class: "chef-sort-row" }, h("span", {}, "Trier"), sortSel)),
+      h("div", { class: "filters chef-sources" }, chip("all", "Tous les sites"), ...sources.map(([id, name]) => chip(id, name)))),
     countLine,
     listBox,
     more,
