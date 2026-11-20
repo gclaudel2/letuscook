@@ -643,14 +643,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.17.0"></script>
-<script src="extracteur.js?v=2.17.0"></script>
+<script src="config.js?v=2.17.1"></script>
+<script src="extracteur.js?v=2.17.1"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.17.0";
+const APP_VERSION = "2.17.1";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1385,7 +1385,7 @@ function renderHome() {
 
   const tabs = h("div", { class: "tabs", role: "tablist", "aria-label": "Sections" },
     h("button", { class: "tab", role: "tab", "aria-selected": String(state.tab === "recherche"), onclick: () => go("#/") }, "Chercher"),
-    h("button", { class: "tab", role: "tab", "aria-selected": String(state.tab === "extraire"), onclick: () => go("#/lien") }, "Lien"),
+    h("button", { class: "tab", role: "tab", "aria-selected": String(state.tab === "extraire"), onclick: () => go("#/lien") }, "Analyser"),
     h("button", { class: "tab", role: "tab", "aria-selected": String(state.tab === "chefs"), onclick: () => go("#/chefs") }, "Explorer"),
     h("button", { class: "tab", role: "tab", "aria-selected": String(state.tab === "carnet"), onclick: () => go("#/carnet") },
       "Carnet ", h("span", { class: "count" }, state.recipes.length ? `· ${state.recipes.length}` : "")),
@@ -1990,7 +1990,7 @@ async function openSharedLink(code) {
     history.replaceState(null, "", "#/apercu");
     renderRecipe(state.preview, { saved: false });
     if (navigator.standalone === false && /iPhone|iPad/.test(navigator.userAgent)) {
-      toast("Astuce : pour l'enregistrer dans l'appli de l'écran d'accueil, copiez ce lien et collez-le dans son onglet Lien.");
+      toast("Astuce : pour l'enregistrer dans l'appli de l'écran d'accueil, copiez ce lien et collez-le dans son onglet Analyser.");
     }
   } catch {
     history.replaceState(null, "", "#/");
