@@ -272,6 +272,9 @@
   .photo-block .or { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; color: var(--muted); font-size: 14px; }
   .photo-block .or::before, .photo-block .or::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
   .photo-btn { width: 100%; }
+  .share-opts { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+  .share-opt { width: 100%; justify-content: flex-start; gap: 12px; text-decoration: none; color: var(--ink); }
+  .share-dlg h2:focus { outline: none; }
   .history-head { display: flex; align-items: baseline; justify-content: space-between; margin: 22px 2px 10px; }
   .history-head h3 { margin: 0; font: var(--head-w) 20px/1.2 var(--head); }
   .link-btn { border: 0; background: none; color: var(--muted); font-size: 14px; padding: 8px 4px; min-height: 36px; }
@@ -640,14 +643,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.16.0"></script>
-<script src="extracteur.js?v=2.16.0"></script>
+<script src="config.js?v=2.17.0"></script>
+<script src="extracteur.js?v=2.17.0"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.16.0";
+const APP_VERSION = "2.17.0";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -676,6 +679,11 @@ const ICONS = {
   sun: "M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10zM12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4",
   bookmark: "M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z",
   check: "M20 6L9 17l-5-5",
+  copy: "M20 9h-9a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2zM5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1",
+  mail: "M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM22 6l-10 7L2 6",
+  chat: "M21 11.5a8.4 8.4 0 0 1-9 8.4 8.6 8.6 0 0 1-3.8-.9L3 21l1.9-5.2A8.4 8.4 0 0 1 12 3a8.4 8.4 0 0 1 9 8.5z",
+  message: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z",
+  share: "M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8M16 6l-4-4-4 4M12 2v13",
   trash: "M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6",
   refresh: "M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15",
   camera: "M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2zM12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z",
@@ -1300,6 +1308,7 @@ function route() {
   if (hash === "#/apercu") {
     return state.preview ? renderRecipe(state.preview, { saved: false }) : go("#/", true);
   }
+  if (hash.startsWith("#/partage/")) { openSharedLink(hash.slice("#/partage/".length)); return; }
   state.tab = hash === "#/carnet" ? "carnet" : hash === "#/lien" ? "extraire" : hash === "#/chefs" ? "chefs" : "recherche";
   renderHome();
   if (state.tab === "recherche" && state.search.scrollY) {
@@ -1502,6 +1511,8 @@ async function runExtraction(raw) {
   state.lastUrl = raw;
   state.lastError = "";
 
+  const shared = /#\/partage\/([A-Za-z0-9_-]+)/.exec(String(raw || ""));
+  if (shared) return openSharedLink(shared[1]); // lien de partage letuscook collé dans l'onglet Lien
   let url;
   try { url = ZBC.parseTargetUrl(raw); } catch (err) { state.lastError = err.message; return renderHome(); }
 
@@ -1877,6 +1888,118 @@ function openResult(res) {
   runExtraction(res.url);
 }
 
+
+/* ════════════ Partage d'une recette ════════════ */
+/*
+ * Le lien contient la recette elle-même (compressée) : la personne qui l'ouvre la retrouve telle quelle dans
+ * letuscook, sans Internet ni relais, et peut l'enregistrer. Le message contient aussi la recette en texte,
+ * lisible par quelqu'un qui n'a pas l'appli.
+ */
+const APP_URL = () => location.origin + location.pathname;
+const b64url = (bytes) => { let s = ""; bytes.forEach((b) => { s += String.fromCharCode(b); }); return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); };
+const unb64url = (str) => Uint8Array.from(atob(str.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+async function pipeBytes(bytes, stream) { return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer()); }
+
+/** Recette → ce qui est utile au partage (sans la photo prise avec l'iPhone, trop lourde). */
+function shareable(recipe) {
+  const pick = (o, keys) => Object.fromEntries(keys.filter((k) => o[k] != null && o[k] !== "").map((k) => [k, o[k]]));
+  const out = pick(recipe, ["title", "description", "sourceUrl", "siteName", "servings", "yieldText", "prepTimeMin", "cookTimeMin", "totalTimeMin", "chef", "difficulty", "rating", "calories", "extractedVia", "aiProvider"]);
+  if (safeHttpUrl(recipe.image)) out.image = recipe.image;
+  out.ingredients = (recipe.ingredients || []).map((i) => pick(i, ["raw", "quantity", "quantityMax", "unit", "name", "note", "section"]));
+  out.steps = (recipe.steps || []).map((st) => pick(st, ["text", "section"]));
+  return out;
+}
+
+async function encodeShare(recipe) {
+  const json = new TextEncoder().encode(JSON.stringify(shareable(recipe)));
+  if (typeof CompressionStream === "function") {
+    try { return "z" + b64url(await pipeBytes(json, new CompressionStream("deflate-raw"))); } catch { /* sans compression */ }
+  }
+  return "j" + b64url(json);
+}
+async function decodeShare(code) {
+  const bytes = unb64url(code.slice(1));
+  const raw = code[0] === "z" ? await pipeBytes(bytes, new DecompressionStream("deflate-raw")) : bytes;
+  const r = JSON.parse(new TextDecoder().decode(raw));
+  if (!r || typeof r.title !== "string" || !Array.isArray(r.steps)) throw new Error("lien incomplet");
+  return r;
+}
+
+/** Recette en texte simple (pour ceux qui n'ont pas letuscook). */
+function shareText(recipe, link) {
+  const lines = [`🍽️ ${recipe.title}`];
+  if (recipe.chef) lines.push(`Recette du chef ${recipe.chef}`);
+  const facts = [recipe.servings && `${recipe.servings} personnes`, recipe.totalTimeMin && formatMinutes(recipe.totalTimeMin)].filter(Boolean);
+  if (facts.length) lines.push(facts.join(" · "));
+  lines.push("", `À ouvrir dans letuscook : ${link}`);
+  if (recipe.ingredients && recipe.ingredients.length) {
+    lines.push("", "INGRÉDIENTS");
+    let sec;
+    recipe.ingredients.forEach((i) => {
+      if (i.section && i.section !== sec) { sec = i.section; lines.push(`${sec} :`); }
+      lines.push(`• ${i.quantity != null ? ZBC.formatIngredient(i, 1) : i.raw || i.name}`);
+    });
+  }
+  if (recipe.steps && recipe.steps.length) {
+    lines.push("", "PRÉPARATION");
+    recipe.steps.forEach((st, n) => lines.push(`${n + 1}. ${st.text}`));
+  }
+  if (recipe.sourceUrl) lines.push("", `Recette d'origine : ${recipe.sourceUrl}`);
+  return lines.join("\n");
+}
+
+async function openShare(recipe) {
+  let link;
+  try { link = `${APP_URL()}#/partage/${await encodeShare(recipe)}`; } catch { link = recipe.sourceUrl || APP_URL(); }
+  const text = shareText(recipe, link);
+  const subject = `Recette : ${recipe.title}`;
+  const close = () => { dlg.close(); dlg.remove(); };
+  const opt = (iconName, label, onclick, href) => href
+    ? h("a", { class: "btn share-opt", href, target: "_blank", rel: "noopener", onclick: () => setTimeout(close, 300) }, icon(iconName), label)
+    : h("button", { type: "button", class: "btn share-opt", onclick }, icon(iconName), label);
+  const enc = encodeURIComponent;
+  const dlg = h("dialog", { class: "share-dlg", "aria-labelledby": "share-title" },
+    h("h2", { id: "share-title", tabindex: "-1" }, "Partager la recette"),
+    h("p", { class: "site-help" }, `« ${recipe.title} » : la personne l'ouvre directement dans letuscook (et peut l'enregistrer), ou la lit en texte si elle n'a pas l'appli.`),
+    h("div", { class: "share-opts" },
+      navigator.share && opt("share", "Partager… (Messages, WhatsApp, Mail…)", async () => {
+        try { await navigator.share({ title: subject, text }); close(); } catch { /* annulé */ }
+      }),
+      opt("chat", "WhatsApp", null, `https://wa.me/?text=${enc(text)}`),
+      opt("message", "SMS / iMessage", null, `sms:&body=${enc(text)}`),
+      opt("mail", "E-mail", null, `mailto:?subject=${enc(subject)}&body=${enc(text)}`),
+      opt("copy", "Copier le lien", async () => {
+        try { await navigator.clipboard.writeText(link); toast("Lien copié"); close(); } catch { toast("Copie impossible"); }
+      })),
+    h("button", { type: "button", class: "btn", style: "width:100%;margin-top:10px", onclick: close }, "Fermer"));
+  dlg.addEventListener("close", () => dlg.remove());
+  document.body.append(dlg);
+  dlg.showModal();
+  $("#share-title", dlg)?.focus?.();
+}
+
+/** Ouverture d'un lien de partage : la recette s'affiche, prête à être enregistrée. */
+async function openSharedLink(code) {
+  try {
+    const recipe = await decodeShare(code);
+    const already = recipe.sourceUrl && findBySource(recipe.sourceUrl);
+    state.preview = { ...recipe, extractedAt: new Date().toISOString() };
+    state.previewWarnings = [already ? "Recette partagée : vous l'avez déjà dans votre carnet." : "Recette partagée avec letuscook : touchez « Enregistrer » pour la garder dans votre carnet."];
+    store.del("zbc.progress.apercu");
+    state.returnTo = "";
+    history.replaceState(null, "", "#/apercu");
+    renderRecipe(state.preview, { saved: false });
+    if (navigator.standalone === false && /iPhone|iPad/.test(navigator.userAgent)) {
+      toast("Astuce : pour l'enregistrer dans l'appli de l'écran d'accueil, copiez ce lien et collez-le dans son onglet Lien.");
+    }
+  } catch {
+    history.replaceState(null, "", "#/");
+    state.tab = "recherche";
+    renderHome();
+    toast("Ce lien de partage est incomplet ou abîmé.");
+  }
+}
+
 /* ════════════ Historique : dernières recherches et recettes vues ════════════ */
 const RECENT_SEARCHES = "zbc.recentSearches";
 const RECENT_VIEWS = "zbc.recentViews";
@@ -2121,6 +2244,7 @@ function renderRecipe(recipe, { saved }) {
     h("span", { class: "spacer" }),
     Wake.supported && h("button", { class: "icon-btn", id: "btn-wake", "aria-pressed": "false", onclick: () => (Wake.wanted ? Wake.disable() : Wake.enable()) },
       icon("sun"), h("span", { class: "label" }, "Écran")),
+    h("button", { class: "icon-btn", "aria-label": "Partager la recette", onclick: () => openShare(recipe) }, icon("share")),
     !saved && h("button", {
       class: "icon-btn on", onclick: async (e) => {
         e.currentTarget.disabled = true;
