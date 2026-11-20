@@ -825,16 +825,24 @@
     if (!list.length) throw new ExtractError("BAD_IMAGE", "Choisissez une photo.");
     log("Préparation de la photo…", "run");
     const images = [];
-    for (const f of list) images.push(await photoToBase64(f));
+    for (const f of list) images.push(await photoToBase64(f, 1400));
     const kb = Math.round(images.reduce((n, b) => n + b.length * 0.75, 0) / 1024);
     log(`Lecture par l'IA (${list.length > 1 ? `${list.length} photos, ` : ""}${kb} Ko envoyés, souvent 10 à 40 s)…`, "run");
     let res;
-    try {
-      res = await callWorker("/photo", { images });
-    } catch (err) {
-      if (err.code === "NOT_FOUND") err.message = "Le relais n'est pas à jour : recollez le fichier relais.js dans Cloudflare pour activer la lecture des photos par l'IA.";
-      log(err.message, "error");
-      throw err;
+    // 1er essai normal ; si Gemini refuse de reprendre un texte de livre, 2e essai en résumé compact
+    for (const mode of ["normal", "compact"]) {
+      try {
+        res = await callWorker("/photo", { images, mode });
+        break;
+      } catch (err) {
+        if (err.code === "RECITATION" && mode === "normal") {
+          log("Gemini refuse de recopier un texte de livre : nouvel essai, étapes résumées…", "warn");
+          continue;
+        }
+        if (err.code === "NOT_FOUND") err.message = "Le relais n'est pas à jour : recollez le fichier relais.js dans Cloudflare pour activer la lecture des photos par l'IA.";
+        log(err.message, "error");
+        throw err;
+      }
     }
     const who = PROVIDER_NAMES[res.provider] || "l'IA";
     if (!res.recipe || res.recipe.found === false) {
