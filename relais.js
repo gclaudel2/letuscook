@@ -658,6 +658,9 @@ async function handleLinks(body, env) {
   return { ok: true, finalUrl: page.finalUrl, links, via: page.via };
 }
 
+// Texte de lien qui n'est pas un titre (« Lire plus », « Voir la recette »…) : on garde le vrai nom de la recette
+const GENERIC_LINK = /^(?:lire|voir|découvrir|decouvrir|en savoir|read|see|more|plus|suite|la suite|cliquez|>|›|»|→)(?:\s|$)|^(?:lire|voir) (?:la )?(?:suite|plus|recette|l'article)|^(?:read|see) (?:more|recipe)|^(?:en )?savoir plus$/i;
+
 function linksIn(page, re) {
   const base = new URL(page.finalUrl);
   const found = new Map();
@@ -678,7 +681,7 @@ function linksIn(page, re) {
     let img = imageIn(m[2]);
     if (img) { try { img = new URL(img, base).toString(); } catch { img = ""; } }
     const prev = found.get(key) || { u: key, t: "", i: "" };
-    if (!prev.t && title.length >= 3) prev.t = title;
+    if ((!prev.t || GENERIC_LINK.test(prev.t)) && title.length >= 3 && !GENERIC_LINK.test(title)) prev.t = title;
     if (!prev.i && img) prev.i = img;
     found.set(key, prev);
   }
@@ -687,13 +690,21 @@ function linksIn(page, re) {
   const done = new Set();
   spots.forEach((sp, n) => {
     const item = found.get(sp.key);
-    if (item.i || done.has(sp.key)) return;
+    const needTitle = !item.t || GENERIC_LINK.test(item.t);
+    if ((item.i && !needTitle) || done.has(sp.key)) return;
     done.add(sp.key);
     let from = Math.max(0, sp.start - 1500), to = Math.min(html.length, sp.end + 1500);
     for (let k = n - 1; k >= 0; k--) if (spots[k].key !== sp.key) { from = Math.max(from, spots[k].end); break; }
     for (let k = n + 1; k < spots.length; k++) if (spots[k].key !== sp.key) { to = Math.min(to, spots[k].start); break; }
-    const img = imagesIn(html.slice(from, sp.start)).pop() || imagesIn(html.slice(sp.end, to))[0];
-    if (img) { try { item.i = new URL(img, base).toString(); } catch { /* adresse invalide */ } }
+    if (!item.i) {
+      const img = imagesIn(html.slice(from, sp.start)).pop() || imagesIn(html.slice(sp.end, to))[0];
+      if (img) { try { item.i = new URL(img, base).toString(); } catch { /* adresse invalide */ } }
+    }
+    if (needTitle) { // « Lire plus » : le nom de la recette est dans un titre de la même carte
+      const heads = (part) => [...part.matchAll(/<(h[1-6])\b[^>]*>([\s\S]*?)<\/\1>/gi)].map((m) => stripTags(m[2])).filter((t) => t.length >= 3 && !GENERIC_LINK.test(t));
+      const t = heads(html.slice(from, sp.start)).pop() || heads(html.slice(sp.end, to))[0];
+      if (t) item.t = t.slice(0, 160);
+    }
   });
   return [...found.values()];
 }

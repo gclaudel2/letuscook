@@ -1328,6 +1328,11 @@
     // 1 ou 2 mots : tous ; au-delà : au moins 60 % ("gâteau chocolat noisette" ≈ "gâteau au chocolat")
     return words.length <= 2 ? hits === words.length : hits >= Math.ceil(words.length * 0.6);
   }
+  /** Texte de lien qui n'est pas un titre de recette (« Lire plus », « Voir la recette »…). */
+  const GENERIC_LINK = /^(?:lire|voir|découvrir|decouvrir|en savoir|read|see|more|plus|suite|la suite|cliquez|>|›|»|→)(?:\s|$)|^(?:lire|voir) (?:la )?(?:suite|plus|recette|l'article)|^(?:read|see) (?:more|recipe)|^(?:en )?savoir plus$/i;
+  const goodTitle = (t) => !!t && t.length >= 3 && !GENERIC_LINK.test(normSpace(t));
+  /** Titre affichable d'une recette indexée : le texte du lien, sinon le titre tiré de l'adresse. */
+  const indexTitle = (it) => (goodTitle(it.t) ? it.t : titleFromSlug(new URL(it.u).pathname));
   const titleFromSlug = (path) => {
     const slug = decodeURIComponent(path.split("/").filter(Boolean).pop() || "")
       .replace(/\.(aspx|html?|php)$/i, "").replace(/^recette_/, "").replace(/^\d+-|[-_]r?\d+$|-fid-\d+$/g, "").replace(/[-_]+/g, " ").trim();
@@ -1537,7 +1542,8 @@
       const g = groups.get(key) || { prefix, ext, slash, items: new Map() };
       const t = normSpace(a.textContent).slice(0, 160);
       const prev = g.items.get(u.toString()) || { u: u.toString(), t: "", i: "" };
-      prev.t = prev.t || t; prev.i = prev.i || imageFromElement(a, base.toString());
+      if (!goodTitle(prev.t) && goodTitle(t)) prev.t = t;
+      prev.i = prev.i || imageFromElement(a, base.toString());
       g.items.set(u.toString(), prev);
       groups.set(key, g);
     });
@@ -1598,7 +1604,14 @@
         u.search = ""; u.hash = "";
         const k = u.toString();
         const prev = out.get(k) || { u: k, t: "", i: "" };
-        prev.t = prev.t || normSpace(a.textContent).slice(0, 160);
+        let txt = normSpace(a.textContent).slice(0, 160);
+        if (!goodTitle(txt)) { // « Lire plus » : on prend le titre de la carte qui contient le lien
+          let box = a.parentElement;
+          for (let k = 0; box && k < 4 && !box.querySelector("h1,h2,h3,h4"); k++) box = box.parentElement;
+          const head = box && box.querySelector("h1,h2,h3,h4");
+          if (head) txt = normSpace(head.textContent).slice(0, 160);
+        }
+        if (!goodTitle(prev.t) && goodTitle(txt)) prev.t = txt;
         prev.i = prev.i || imageFromElement(a, url);
         out.set(k, prev);
       });
@@ -1621,8 +1634,13 @@
         if (n === 1 && !links.length) break;
         let added = 0;
         for (const l of links) {
-          if (!items.has(l.u)) { items.set(l.u, { u: l.u, t: l.t || titleFromSlug(new URL(l.u).pathname), i: l.i || "" }); added++; }
-          else if (l.i && !items.get(l.u).i) items.get(l.u).i = l.i;
+          const t = goodTitle(l.t) ? l.t : "";
+          if (!items.has(l.u)) { items.set(l.u, { u: l.u, t: t || titleFromSlug(new URL(l.u).pathname), i: l.i || "", slugTitle: !t }); added++; }
+          else {
+            const it = items.get(l.u);
+            if (t && it.slugTitle) { it.t = t; delete it.slugTitle; } // un autre lien vers la même recette porte son vrai nom
+            if (l.i && !it.i) it.i = l.i;
+          }
         }
         onProgress(cat, pagesRead, items.size);
         emptyStreak = added ? 0 : emptyStreak + 1;
@@ -1727,7 +1745,7 @@
   function chefIndexItems() {
     const idx = readChefIndex(); const off = chefSourcesOff();
     return allChefCatalogs().filter((c) => !off.includes(c.id) && idx.sites[c.id]).flatMap((c) =>
-      idx.sites[c.id].items.map((it) => ({ url: it.u, title: it.t, image: it.i || cachedImage(it.u) || undefined, site: c.name, sourceId: c.id, chefSite: true })));
+      idx.sites[c.id].items.map((it) => ({ url: it.u, title: indexTitle(it), image: it.i || cachedImage(it.u) || undefined, site: c.name, sourceId: c.id, chefSite: true })));
   }
 
   function searchChefIndex(words, perSource = 4) {
@@ -1737,7 +1755,7 @@
       idx.sites[c.id].items
         .filter((it) => matchesQuery(`${it.t} ${new URL(it.u).pathname}`, words))
         .slice(0, perSource)
-        .map((it) => ({ url: it.u, title: it.t, image: it.i || cachedImage(it.u) || undefined, site: c.name, chefSite: true })));
+        .map((it) => ({ url: it.u, title: indexTitle(it), image: it.i || cachedImage(it.u) || undefined, site: c.name, chefSite: true })));
   }
 
   /**
