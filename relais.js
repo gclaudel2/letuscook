@@ -278,17 +278,21 @@ async function callGemini(env, prompt, images = []) {
   // Photos : bien plus longues à analyser que du texte → délai plus long, et réflexion du modèle réduite
   const timeoutMs = images.length ? PHOTO_TIMEOUT_MS : GEMINI_TIMEOUT_MS;
   let thinking = { thinkingLevel: "low" }; // retiré automatiquement si le modèle ne le connaît pas
+  let reword = false; // après un refus « RECITATION » : on demande de reformuler au lieu de recopier
   let last;
   for (const model of models) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const generationConfig = { responseMimeType: "application/json", temperature: 0, ...(thinking ? { thinkingConfig: thinking } : {}) };
+        const generationConfig = { responseMimeType: "application/json", temperature: reword ? 0.4 : 0, maxOutputTokens: 8192, ...(thinking ? { thinkingConfig: thinking } : {}) };
+        const userText = reword
+          ? `${prompt}\nIMPORTANT : ne recopie pas le texte mot à mot. Reformule brièvement chaque étape avec tes propres mots (mêmes gestes, mêmes temps, mêmes températures) ; garde les quantités exactes.`
+          : prompt;
         const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
           method: "POST",
           headers: { "content-type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
           body: JSON.stringify({
             systemInstruction: { parts: [{ text: jsonInstructions() }] },
-            contents: [{ role: "user", parts: [...images.map((data) => ({ inlineData: { mimeType: "image/jpeg", data } })), { text: prompt }] }],
+            contents: [{ role: "user", parts: [...images.map((data) => ({ inlineData: { mimeType: "image/jpeg", data } })), { text: userText }] }],
             generationConfig,
           }),
           signal: AbortSignal.timeout(timeoutMs),
@@ -300,9 +304,21 @@ async function callGemini(env, prompt, images = []) {
         }
         await checkResponse(res, `Gemini (${model})`);
         const data = await res.json();
-        const text = (data.candidates?.[0]?.content?.parts || []).filter((p) => !p.thought).map((p) => p.text || "").join("");
+        const cand = data.candidates?.[0];
+        const text = (cand?.content?.parts || []).filter((p) => !p.thought).map((p) => p.text || "").join("");
         if (!text && data.promptFeedback?.blockReason) throw new Error(`requête bloquée par Gemini (${data.promptFeedback.blockReason})`);
-        return parseJsonText(text);
+        if (!text.trim()) {
+          const reason = cand?.finishReason || "inconnue";
+          if (reason === "RECITATION" && !reword) { reword = true; attempt--; continue; } // texte de livre : on redemande en reformulant
+          last = new Error(EMPTY_REASONS[reason] || `réponse vide (raison : ${reason})`);
+          break; // modèle suivant
+        }
+        try {
+          return parseJsonText(text);
+        } catch {
+          last = new Error(cand?.finishReason === "MAX_TOKENS" ? "réponse trop longue, coupée" : "réponse illisible du modèle");
+          break;
+        }
       } catch (err) {
         if (err && (err.name === "TimeoutError" || err.name === "AbortError")) { last = err; break; } // trop lent : modèle suivant (plus rapide)
         if (!(err instanceof BusyError)) throw err;
@@ -313,6 +329,14 @@ async function callGemini(env, prompt, images = []) {
   }
   throw last;
 }
+
+const EMPTY_REASONS = {
+  RECITATION: "Gemini refuse de recopier ce texte publié, même reformulé",
+  SAFETY: "réponse bloquée par le filtre de sécurité de Gemini",
+  PROHIBITED_CONTENT: "réponse bloquée par Gemini",
+  MAX_TOKENS: "réponse trop longue, coupée",
+  OTHER: "Gemini n'a rien renvoyé",
+};
 
 async function callAnthropic(env, prompt, images = []) {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
