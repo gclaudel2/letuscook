@@ -643,14 +643,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.17.2"></script>
-<script src="extracteur.js?v=2.17.2"></script>
+<script src="config.js?v=2.18.0"></script>
+<script src="extracteur.js?v=2.18.0"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.17.2";
+const APP_VERSION = "2.18.0";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1670,9 +1670,20 @@ function renderSearchPanel() {
 function sourcesText() {
   const S = state.search;
   const indexNote = chefIndexUI.running ? " · index des chefs en cours de constitution" : "";
-  const ok = S.sources.filter((x) => !x.error && x.count > 0).map((x) => `${x.name} (${x.count})`);
-  const ko = S.sources.filter((x) => x.error).map((x) => x.name);
+  const ok = S.sources.filter((x) => !x.error && x.count > 0).map((x) => `${x.name} (${x.count}${x.via ? ` via ${x.via}` : ""})`);
+  const ko = S.sources.filter((x) => x.error).map((x) => `${x.name} (${shortError(x.error)})`);
   return [ok.length && `Trouvé sur ${ok.join(", ")}`, ko.length && `inaccessible${ko.length > 1 ? "s" : ""} : ${ko.join(", ")}`].filter(Boolean).join(" · ") + indexNote;
+}
+
+/** Raison courte d'un site inaccessible, pour la ligne des sources. */
+function shortError(msg) {
+  const m = String(msg || "");
+  if (/bloque/i.test(m)) return "bloque le relais";
+  if (/404|introuvable/i.test(m)) return "recherche introuvable";
+  if (/trop de temps|délais/i.test(m)) return "trop lent";
+  if (/refuse la connexion|52\d/i.test(m)) return "refuse le relais";
+  if (/joindre/i.test(m)) return "injoignable";
+  return m.replace(/\.$/, "").slice(0, 50);
 }
 
 function searchStatusText() {
@@ -1812,9 +1823,9 @@ async function runSearch(raw) {
 
   let found;
   try {
-    found = await ZBC.searchRecipes(q, (name, count, error) => {
+    found = await ZBC.searchRecipes(q, (name, count, error, via) => {
       if (id !== S.id) return;
-      S.sources.push({ name, count, error });
+      S.sources.push({ name, count, error, via });
       if (!S.results.length) renderHome();
     });
   } catch (err) {

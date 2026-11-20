@@ -1427,20 +1427,80 @@
     return out;
   }
 
+  const RELAY_DOWN = ["NO_RELAY", "UNAUTHORIZED", "FORBIDDEN_ORIGIN", "OFFLINE", "RELAY_UNREACHABLE"];
+
   async function searchOneSite(site, query, words) {
     let lastError = null;
     for (const makeUrl of site.url) {
       try {
         const page = await callWorker("/page", { url: makeUrl(query) });
         const links = linksFromSearchPage(site, page.html, words);
-        if (links.length || makeUrl === site.url[site.url.length - 1]) return { links, error: null };
+        if (links.length) return { links, error: null };
         lastError = null; // page lue mais vide : on tente l'adresse suivante
       } catch (err) {
-        if (["NO_RELAY", "UNAUTHORIZED", "FORBIDDEN_ORIGIN", "OFFLINE", "RELAY_UNREACHABLE"].includes(err.code)) throw err;
+        if (RELAY_DOWN.includes(err.code)) throw err;
         lastError = err;
       }
     }
+    // Recherche du site refusée, introuvable ou sans résultat lisible : on passe par un moteur de recherche
+    // (« site:www.exemple.fr gratin »), qui renvoie les mêmes pages de recettes.
+    const viaEngine = await searchViaEngine(site, query, words);
+    if (viaEngine.links.length) return { links: viaEngine.links, error: null, via: viaEngine.engine };
     return { links: [], error: lastError ? lastError.message : null };
+  }
+
+  // ── Recherche de secours par moteur de recherche (Bing, puis DuckDuckGo) ──
+  const SEARCH_ENGINES = [
+    { name: "Bing", url: (host, q) => `https://www.bing.com/search?q=${encodeURIComponent(`site:${host} ${q}`)}&setlang=fr&cc=FR&count=30` },
+    { name: "DuckDuckGo", url: (host, q) => `https://html.duckduckgo.com/html/?q=${encodeURIComponent(`site:${host} ${q}`)}&kl=fr-fr` },
+  ];
+  /** Lien d'un moteur → vraie adresse (Bing et DuckDuckGo passent parfois par une adresse de redirection). */
+  function unwrapEngineLink(href, base) {
+    let u;
+    try { u = new URL(href, base); } catch { return null; }
+    if (/duckduckgo\.com$/.test(u.hostname) && u.searchParams.get("uddg")) {
+      try { return new URL(u.searchParams.get("uddg")); } catch { return null; }
+    }
+    if (/bing\.com$/.test(u.hostname) && u.pathname.startsWith("/ck/")) {
+      const enc = u.searchParams.get("u") || "";
+      if (enc.startsWith("a1")) {
+        try { return new URL(atob(enc.slice(2).replace(/-/g, "+").replace(/_/g, "/"))); } catch { return null; }
+      }
+      return null;
+    }
+    return u;
+  }
+  async function searchViaEngine(site, query, words) {
+    const sameSite = (h) => h.replace(/^www\./, "") === site.host.replace(/^www\./, "");
+    const isRecipe = (path) => (site.recipe ? site.recipe.test(path) : looksLikeRecipePath(path));
+    for (const engine of SEARCH_ENGINES) {
+      let page;
+      try { page = await callWorker("/page", { url: engine.url(site.host, query) }); } catch (err) {
+        if (RELAY_DOWN.includes(err.code)) throw err;
+        continue;
+      }
+      const doc = new DOMParser().parseFromString(page.html, "text/html");
+      const found = new Map();
+      doc.querySelectorAll("a[href]").forEach((a) => {
+        const u = unwrapEngineLink(a.getAttribute("href"), page.finalUrl || engine.url(site.host, query));
+        if (!u || !sameSite(u.hostname) || !isRecipe(u.pathname)) return;
+        u.search = ""; u.hash = "";
+        const key = u.toString();
+        // titre du résultat, sans le « - Marmiton » ou « | Ptitchef » ajouté par le site
+        const t = normSpace(a.textContent).replace(/\s*[-|–—·:]\s*[^-|–—·:]{2,40}$/, "").slice(0, 140);
+        if (!found.has(key) || (!goodTitle(found.get(key)) && goodTitle(t))) found.set(key, t);
+      });
+      const out = [];
+      for (const [url, t0] of found) {
+        const path = new URL(url).pathname;
+        const t = goodTitle(t0) && !/^https?:/.test(t0) ? t0 : titleFromSlug(path);
+        if (!matchesQuery(`${t} ${path}`, words)) continue;
+        out.push({ url, title: t, image: cachedImage(url) || undefined, site: site.name, chefSite: site.chef || undefined });
+        if (out.length >= PER_SITE) break;
+      }
+      if (out.length) return { links: out, engine: engine.name };
+    }
+    return { links: [] };
   }
 
 
@@ -1772,8 +1832,8 @@
       throw new ExtractError("NO_SITES", "Aucun site de recherche activé et aucune recette de chef indexée : choisissez des sites dans les Réglages.");
     }
     const perSite = await Promise.all(sites.map(async (site) => {
-      const { links, error } = await searchOneSite(site, query, words);
-      onSite(site.name, links.length, error);
+      const { links, error, via } = await searchOneSite(site, query, words);
+      onSite(site.name, links.length, error, via);
       return links;
     }));
     // Recettes de chefs de l'index (instantané, sans réseau)
