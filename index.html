@@ -180,7 +180,7 @@
   .bc { position: relative; font: 700 0.92em/1 Kalam, cursive; letter-spacing: -0.01em; color: var(--flame-2); }
   .bc svg { position: absolute; left: 0.04em; bottom: -0.16em; width: 100%; height: 0.3em; }
   .be { flex-direction: column; gap: 6px; }
-  .be-word { font: 600 0.68em/1 "Cormorant Garamond", Georgia, serif; letter-spacing: 0.2em; color: var(--ink); }
+  .be-word { font: 600 0.68em/1 "Cormorant Garamond", Georgia, serif; letter-spacing: 0.16em; color: var(--ink); }
   .be-rule { display: flex; align-items: center; gap: 10px; color: var(--gold); }
   .be-rule i { width: 56px; border-top: 1px solid var(--gold); }
   .be-rule svg { width: 12px; height: 12px; }
@@ -218,13 +218,22 @@
   .hero { padding: 14px 0 22px; }
   .brand-link { color: inherit; text-decoration: none; -webkit-tap-highlight-color: transparent; }
   .brand-link:active { opacity: 0.6; }
+  .brand-link { display: inline-flex; align-items: center; gap: 0.22em; }
+  .brand-icon { flex: none; width: 0.82em; height: 0.82em; border-radius: 22%; box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 12%, transparent); }
+  .hero.compact .brand-icon { width: 1em; height: 1em; }
+  html .tabs .tab { flex: 1 1 auto; } /* largeur selon le mot : « Chercher » n'est plus coupé */
+  @media (max-width: 400px) {
+    html .tabs { gap: 2px; }
+    html .tabs .tab { padding: 0 5px; font-size: 14.5px; }
+    html[data-theme="etoile"] .tabs .tab { font-size: 12px; letter-spacing: 0.06em; }
+  }
   .hero-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .hero-row .icon-btn { margin: 0 -10px 0 0; flex: none; }
   .hero.compact .hero-row { align-items: center; }
   .hero.compact .hero-row .icon-btn { margin-top: 0; }
   .topbar .wrap:empty { min-height: 0; }
 
-  .brand { margin: 0; font: 800 clamp(44px, 13vw, 60px)/1 var(--serif); letter-spacing: -0.045em; white-space: nowrap; }
+  .brand { min-width: 0; margin: 0; font: 800 clamp(36px, 11.5vw, 60px)/1 var(--serif); letter-spacing: -0.045em; white-space: nowrap; }
   .brand .b-us { font-style: italic; font-weight: 400; color: var(--accent); margin: 0 0.03em 0 0.05em; letter-spacing: -0.02em; }
   .brand .b-cook {
     position: relative; padding-right: 0.04em;
@@ -692,14 +701,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.19.1"></script>
-<script src="extracteur.js?v=2.19.1"></script>
+<script src="config.js?v=2.19.2"></script>
+<script src="extracteur.js?v=2.19.2"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.19.1";
+const APP_VERSION = "2.19.2";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1449,6 +1458,7 @@ function renderHome() {
       h("div", { class: "hero-row" },
         h("h1", { class: "brand" },
           h("a", { href: "#/", class: "brand-link", "aria-label": "letuscook : retour à l'accueil", onclick: (e) => { e.preventDefault(); resetHome(); } },
+            h("img", { class: "brand-icon", src: "icons/icon-192.png?v=2", alt: "", width: "192", height: "192" }),
             ...brandParts())),
         settingsButton()),
       h("p", { class: "tagline" }, THEME_TAGLINES[currentTheme()] || THEME_TAGLINES.braise),
