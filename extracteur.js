@@ -827,7 +827,7 @@
     const images = [];
     for (const f of list) images.push(await photoToBase64(f));
     const kb = Math.round(images.reduce((n, b) => n + b.length * 0.75, 0) / 1024);
-    log(`Lecture par l'IA (${list.length > 1 ? `${list.length} photos, ` : ""}${kb} Ko envoyés, 5 à 30 s)…`, "run");
+    log(`Lecture par l'IA (${list.length > 1 ? `${list.length} photos, ` : ""}${kb} Ko envoyés, souvent 10 à 40 s)…`, "run");
     let res;
     try {
       res = await callWorker("/photo", { images });

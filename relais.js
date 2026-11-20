@@ -29,6 +29,7 @@
 const FETCH_TIMEOUT_MS = 12000;
 const LLM_TIMEOUT_MS = 40000;
 const GEMINI_TIMEOUT_MS = 25000; // par essai (plusieurs essais possibles)
+const PHOTO_TIMEOUT_MS = 90000; // lecture de photos : l'image prend plus de temps à analyser
 const MAX_HTML_BYTES = 3 * 1024 * 1024; // au-delà on tronque : le JSON-LD est presque toujours au début
 const MAX_AI_CHARS = 20000;
 
@@ -242,26 +243,36 @@ async function checkResponse(res, label) {
 /** Gemini : surcharges fréquentes en gratuit → 2 modèles, 2 essais chacun. */
 async function callGemini(env, prompt, images = []) {
   const models = [...new Set([env.GEMINI_MODEL || "gemini-flash-latest", env.GEMINI_FALLBACK_MODEL || "gemini-flash-lite-latest"])];
+  // Photos : bien plus longues à analyser que du texte → délai plus long, et réflexion du modèle réduite
+  const timeoutMs = images.length ? PHOTO_TIMEOUT_MS : GEMINI_TIMEOUT_MS;
+  let thinking = { thinkingLevel: "low" }; // retiré automatiquement si le modèle ne le connaît pas
   let last;
   for (const model of models) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
+        const generationConfig = { responseMimeType: "application/json", temperature: 0, ...(thinking ? { thinkingConfig: thinking } : {}) };
         const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
           method: "POST",
           headers: { "content-type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
           body: JSON.stringify({
             systemInstruction: { parts: [{ text: jsonInstructions() }] },
             contents: [{ role: "user", parts: [...images.map((data) => ({ inlineData: { mimeType: "image/jpeg", data } })), { text: prompt }] }],
-            generationConfig: { responseMimeType: "application/json", temperature: 0 },
+            generationConfig,
           }),
-          signal: AbortSignal.timeout(images.length ? GEMINI_TIMEOUT_MS * 2 : GEMINI_TIMEOUT_MS),
+          signal: AbortSignal.timeout(timeoutMs),
         });
+        if (res.status === 400 && thinking) {
+          const detail = await res.text();
+          if (/thinking/i.test(detail)) { thinking = null; attempt--; continue; } // modèle sans ce réglage : on réessaie sans
+          throw new Error(`Gemini (${model}) HTTP 400: ${detail.slice(0, 300)}`);
+        }
         await checkResponse(res, `Gemini (${model})`);
         const data = await res.json();
         const text = (data.candidates?.[0]?.content?.parts || []).filter((p) => !p.thought).map((p) => p.text || "").join("");
         if (!text && data.promptFeedback?.blockReason) throw new Error(`requête bloquée par Gemini (${data.promptFeedback.blockReason})`);
         return parseJsonText(text);
       } catch (err) {
+        if (err && (err.name === "TimeoutError" || err.name === "AbortError")) { last = err; break; } // trop lent : modèle suivant (plus rapide)
         if (!(err instanceof BusyError)) throw err;
         last = err;
         if (attempt === 0) await sleep(1500);
