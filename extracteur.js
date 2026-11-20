@@ -568,8 +568,9 @@
       if (tag !== "UL" && tag !== "OL" && el.closest("li")) continue; // contenu d'un élément de liste : traité avec la liste
       if (/^H[1-6]$/.test(tag)) {
         const t = normSpace(el.textContent);
-        afterStepHeading = STEP_HEADING.test(t) && !ING_HEADING.test(t);
         const isTitle = tag === "H1" || (meta.title && meta.title.toLowerCase().includes(t.toLowerCase()));
+        // le titre de la page (« La recette de pot-au-feu de… ») n'annonce pas les étapes
+        afterStepHeading = !isTitle && STEP_HEADING.test(t) && !ING_HEADING.test(t);
         section = !afterStepHeading && !ING_HEADING.test(t) && !isTitle && t.length <= 50 ? t.replace(/\s*:$/, "") : null;
         entries.push({ kind: "heading", text: t, step: afterStepHeading });
         continue;
@@ -658,7 +659,8 @@
     }
     // … sinon paragraphes numérotés "1. …", "Étape 2 : …"
     if (steps.length < 2) {
-      const numbered = entries.filter((e) => e.kind === "other" && e.text && /^(?:[ée]tape\s*)?\d{1,2}\s*[.):–-]\s*\S/i.test(e.text));
+      // toute ligne qui commence par un numéro d'étape, même courte (« ÉTAPE 5 : Au moment de servir, ajouter… »)
+      const numbered = entries.filter((e) => e.kind !== "heading" && e.kind !== "list" && e.text && /^(?:[ée]tape\s*)?\d{1,2}\s*[.):–-]\s*\S/i.test(e.text));
       if (numbered.length >= 2) steps = numbered.map((e) => ({ text: e.text.replace(STEP_NUMBERING, "").trim() }));
     }
     // … sinon paragraphes sous un titre "Préparation"
