@@ -100,10 +100,13 @@ function streamedJson(work, cors, ctx) {
     try { await writer.write(enc.encode(JSON.stringify(out))); await writer.close(); } catch { /* appli partie entre-temps */ }
   })();
   if (ctx && ctx.waitUntil) ctx.waitUntil(done);
-  writer.write(enc.encode(" ")).catch(() => {}); // premier octet tout de suite
+  // 2 Ko d'espaces tout de suite : vide les tampons intermédiaires, l'iPhone voit arriver des données
+  writer.write(enc.encode(" ".repeat(2048))).catch(() => {});
+  // text/event-stream + no-transform : Cloudflare ne compresse pas et ne retient pas ce flux
+  // (une réponse JSON compressée serait gardée en mémoire jusqu'à la fin, et l'iPhone couperait).
   return new Response(readable, {
     status: 200,
-    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...cors },
+    headers: { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-store, no-transform", "x-accel-buffering": "no", ...cors },
   });
 }
 

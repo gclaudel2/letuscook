@@ -1068,7 +1068,15 @@
         `Impossible de joindre le relais (${workerUrl}). Vérifiez son adresse dans les Réglages : en l'ouvrant dans Safari, vous devez voir un message « Relais Zéro Blabla Cuisine ».`,
       );
     }
-    const data = await res.json().catch(() => null);
+    let raw = "", readFailed = false;
+    try { raw = await res.text(); } catch { readFailed = true; }
+    let data = null;
+    try { data = JSON.parse(raw.trim()); } catch { /* réponse coupée ou illisible */ }
+    if (!data && res.ok) {
+      throw new ExtractError("RELAY_CUT", readFailed || !raw.trim()
+        ? "La réponse du relais a été coupée avant la fin (lecture trop longue). Réessayez ; si ça recommence, vérifiez que relais.js est bien à jour dans Cloudflare."
+        : `Réponse illisible du relais : ${raw.trim().slice(0, 120)}`);
+    }
     if (!res.ok || !data || data.ok === false) {
       throw new ExtractError(data?.error?.code || "FETCH_FAILED", data?.error?.message || `Erreur du relais (${res.status}).`);
     }
