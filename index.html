@@ -527,6 +527,7 @@
   .btn.small { height: 42px; padding: 0 14px; font-size: 15px; border-radius: 12px; }
   .btn.primary-sm { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
   dialog::backdrop { background: rgb(0 0 0 / 0.45); }
+  #settings-title:focus { outline: none; }
   dialog h2 { margin: 0 0 4px; font: var(--head-w) 26px/1.1 var(--head); }
   dialog .group { margin-top: 20px; }
   dialog .group p { margin: 6px 0 0; color: var(--muted); font-size: 14px; }
@@ -565,7 +566,7 @@ window.applyTheme = function (name) {
 
 <dialog id="settings" aria-labelledby="settings-title">
   <form method="dialog" id="settings-form">
-    <h2 id="settings-title">Réglages</h2>
+    <h2 id="settings-title" tabindex="-1" autofocus>Réglages</h2>
     <div class="group">
       <label class="field-label" for="set-theme">Apparence</label>
       <select class="input" id="set-theme">
@@ -623,14 +624,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.10.6"></script>
-<script src="extracteur.js?v=2.10.6"></script>
+<script src="config.js?v=2.10.7"></script>
+<script src="extracteur.js?v=2.10.7"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.10.6";
+const APP_VERSION = "2.10.7";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -2376,6 +2377,11 @@ function openSettings() {
   renderChefIndex();
   const dlg = $("#settings");
   if (typeof dlg.showModal === "function") dlg.showModal();
+  // Rien de présélectionné à l'ouverture (sinon l'iPhone déroule la première liste) : le focus va sur le titre
+  const title = $("#settings-title");
+  title.focus({ preventScroll: true });
+  if (document.activeElement && document.activeElement !== title && document.activeElement.matches("select, input, textarea")) document.activeElement.blur();
+  dlg.scrollTop = 0;
 }
 
 $("#set-gesture").addEventListener("change", (e) => store.set("zbc.gestureLevel", e.target.value)); // pris en compte tout de suite
