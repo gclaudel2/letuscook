@@ -623,14 +623,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.10.5"></script>
-<script src="extracteur.js?v=2.10.5"></script>
+<script src="config.js?v=2.10.6"></script>
+<script src="extracteur.js?v=2.10.6"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.10.5";
+const APP_VERSION = "2.10.6";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1695,6 +1695,22 @@ function refreshResults(controlsToo = false) {
   }
 }
 
+/** Photo de résultat introuvable : on essaie la photo de la recette analysée, puis la photo principale de sa page. */
+async function replaceBrokenPhoto(res, broken) {
+  if (res.photoFixTried) return;
+  res.photoFixTried = true;
+  const candidates = [res.recipe && res.recipe.image].map(safeHttpUrl).filter((u) => u && u !== broken);
+  if (!candidates.length) {
+    const images = await ZBC.previewImages([res.url]).catch(() => ({}));
+    const u = safeHttpUrl(images[res.url]);
+    if (u && u !== broken) candidates.push(u);
+  }
+  if (!candidates.length) return;
+  res.image = candidates[0];
+  ZBC.rememberImage(res.url, res.image);
+  refreshResults();
+}
+
 function fact(iconName, text, strong) {
   return h("span", { class: "fact" }, icon(iconName), strong ? h("b", {}, text) : text);
 }
@@ -1704,7 +1720,8 @@ function resultCard(res) {
   const saved = findBySource(res.url);
   // Photo de la page de résultats tout de suite, sinon celle trouvée en analysant la recette
   const img = safeHttpUrl(res.image) || safeHttpUrl(r && r.image);
-  const thumb = thumbWithImage("r-thumb", img, ((r && r.title) || res.title || "?").trim().charAt(0).toUpperCase());
+  const thumb = thumbWithImage("r-thumb", img, ((r && r.title) || res.title || "?").trim().charAt(0).toUpperCase(),
+    () => replaceBrokenPhoto(res, img));
 
   const title = (r && r.title) || res.title.split(/\s+[-|–—·»]\s+/)[0];
   const site = res.site || (r && r.siteName) || hostOf(res.url);
@@ -1855,17 +1872,53 @@ function renderCarnet() {
 }
 
 /** Vignette : l'initiale s'affiche tant que la photo charge ; la photo la remplace dès qu'elle est prête. */
-function thumbWithImage(cls, url, letter) {
+/*
+ * Vignettes : chaque photo est chargée UNE fois puis réutilisée telle quelle (même élément <img>) quand la liste
+ * est redessinée (analyse en cours, retour depuis une recette…) : plus de vignette qui disparaît ou clignote.
+ * Chargement immédiat (pas de « lazy », capricieux sur iPhone quand la liste est reconstruite).
+ * En cas d'échec : 2e essai un peu plus tard (autre réglage d'origine), puis `onFail` (ex. chercher une autre photo).
+ */
+const IMG_POOL = new Map(); // url → { img, state: "loading" | "ok" | "failed" }
+const IMG_POOL_MAX = 150;
+function pooledImage(url, onFail) {
+  let entry = IMG_POOL.get(url);
+  if (entry) { IMG_POOL.delete(url); IMG_POOL.set(url, entry); return entry; } // le plus récent en dernier
+  const img = new Image();
+  img.alt = ""; img.decoding = "async"; img.referrerPolicy = "no-referrer";
+  entry = { img, state: "loading", fails: [] };
+  const done = () => {
+    entry.state = "ok";
+    img.classList.remove("loading");
+    img.parentElement?.querySelector(".initial")?.remove();
+  };
+  let retried = false;
+  img.addEventListener("load", () => { if (img.naturalWidth) done(); });
+  img.addEventListener("error", () => {
+    if (!retried) { // certains sites refusent sans origine, ou une copie en cache était abîmée
+      retried = true;
+      setTimeout(() => { img.referrerPolicy = "strict-origin-when-cross-origin"; img.src = url + (url.includes("?") ? "&" : "?") + "zbc=2"; }, 1200);
+      return;
+    }
+    entry.state = "failed";
+    img.remove();
+    entry.fails.splice(0).forEach((fn) => { try { fn(); } catch { /* */ } });
+  });
+  img.className = "loading";
+  img.src = url;
+  IMG_POOL.set(url, entry);
+  if (IMG_POOL.size > IMG_POOL_MAX) IMG_POOL.delete(IMG_POOL.keys().next().value);
+  return entry;
+}
+
+function thumbWithImage(cls, url, letter, onFail) {
   const initial = h("span", { class: "initial", "aria-hidden": "true" }, letter);
   const thumb = h("div", { class: cls }, initial);
-  if (url) {
-    const img = h("img", { src: url, alt: "", loading: "lazy", decoding: "async", referrerpolicy: "no-referrer", class: "loading" });
-    const shown = () => { img.classList.remove("loading"); initial.remove(); };
-    img.addEventListener("load", shown);
-    img.addEventListener("error", () => img.remove());
-    thumb.append(img); // dans la page dès maintenant : sinon le chargement différé ne démarre jamais
-    if (img.complete && img.naturalWidth) shown(); // déjà en cache
-  }
+  if (!url) return thumb;
+  const entry = pooledImage(url);
+  if (entry.state === "failed") { if (onFail) onFail(); return thumb; }
+  if (onFail) entry.fails.push(onFail);
+  thumb.append(entry.img); // déplace l'image déjà chargée dans la nouvelle carte
+  if (entry.state === "ok" || (entry.img.complete && entry.img.naturalWidth)) { entry.state = "ok"; entry.img.classList.remove("loading"); initial.remove(); }
   return thumb;
 }
 

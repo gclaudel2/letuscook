@@ -5,7 +5,7 @@
  * - Les recettes elles-mêmes sont dans IndexedDB (pas ici)
  * Changer VERSION à chaque mise en ligne d'une nouvelle version force le renouvellement du cache.
  */
-const VERSION = "zbc-2.10.5"; // = APP_VERSION dans index.html
+const VERSION = "zbc-2.10.6"; // = APP_VERSION dans index.html
 const IMAGE_CACHE = "zbc-images";
 const FONT_CACHE = "zbc-fonts"; // polices des thèmes (Google Fonts) et module de lecture des photos, gardés pour le hors ligne
 const MAX_IMAGES = 200;
@@ -61,16 +61,20 @@ async function trimCache(cache) {
   for (let i = 0; i < keys.length - MAX_IMAGES; i++) await cache.delete(keys[i]); // les plus anciennes d'abord
 }
 
+/*
+ * Photos : copie en cache servie tout de suite (et hors ligne), mais rafraîchie en arrière-plan.
+ * Une copie abîmée (ex. refus du site, invisible car « opaque ») ne reste donc pas bloquée pour toujours.
+ */
 async function cacheFirstImage(request) {
   const cache = await caches.open(IMAGE_CACHE);
   const cached = await cache.match(request);
-  if (cached) return cached;
-  try {
-    const response = await fetch(request);
-    if (response.ok || response.type === "opaque") {
-      cache.put(request, response.clone()).then(() => trimCache(cache)).catch(() => {});
-    }
+  const refresh = fetch(request).then((response) => {
+    if (response.ok || response.type === "opaque") cache.put(request, response.clone()).then(() => trimCache(cache)).catch(() => {});
     return response;
+  });
+  if (cached) { refresh.catch(() => {}); return cached; }
+  try {
+    return await refresh;
   } catch {
     return Response.error();
   }
