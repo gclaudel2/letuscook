@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>letuscook</title>
+<title>Let Us Cook</title>
 <meta name="description" content="La recette. Rien que la recette : sans pub ni blabla, en mode cuisine.">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/favicon-32.png?v=2" sizes="32x32" type="image/png">
@@ -11,7 +11,7 @@
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png?v=2">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="letuscook">
+<meta name="apple-mobile-web-app-title" content="Let Us Cook">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="theme-color" content="#FAF6EF" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#12100E" media="(prefers-color-scheme: dark)">
@@ -706,14 +706,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.21.4"></script>
-<script src="extracteur.js?v=2.21.4"></script>
+<script src="config.js?v=2.22.0"></script>
+<script src="extracteur.js?v=2.22.0"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.21.4";
+const APP_VERSION = "2.22.0";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1446,16 +1446,16 @@ function svgEl(viewBox, inner, cls) {
   svg.innerHTML = inner;
   return svg;
 }
-/** Le logo « letuscook » dans le style du thème choisi. */
+/** Le logo « Let Us Cook » dans le style du thème choisi. */
 function brandParts() {
   switch (currentTheme()) {
     case "bistrot":
       return [h("span", { class: "bb" }, h("span", { class: "bb-let" }, "Let us"), h("span", { class: "bb-cook" }, "COOK"), h("span", { class: "bb-rule" }))];
     case "carnet":
-      return [h("span", { class: "bc" }, "letuscook",
+      return [h("span", { class: "bc" }, "Let Us Cook",
         svgEl("0 0 200 16", '<path d="M2 10c40-8 90-9 150-4 15 1 28 0 44-4" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linecap="round"/>'))];
     case "etoile":
-      return [h("span", { class: "be" }, h("span", { class: "be-word" }, "LETUSCOOK"),
+      return [h("span", { class: "be" }, h("span", { class: "be-word" }, "LET US COOK"),
         h("span", { class: "be-rule" }, h("i"), svgEl("0 0 24 24", '<path fill="currentColor" d="M12 0l2.8 9.2L24 12l-9.2 2.8L12 24l-2.8-9.2L0 12l9.2-2.8z"/>'), h("i")))];
     case "marche":
       return [h("span", { class: "bm" }, "let", h("span", { class: "bm-us" }, "us"), h("span", { class: "bm-cook" }, "cook"),
@@ -1501,7 +1501,7 @@ function renderHome() {
     h("section", { class: compact ? "hero compact" : "hero" },
       h("div", { class: "hero-row" },
         h("h1", { class: "brand" },
-          h("a", { href: "#/", class: "brand-link", "aria-label": "letuscook : retour à l'accueil", onclick: (e) => { e.preventDefault(); resetHome(); } },
+          h("a", { href: "#/", class: "brand-link", "aria-label": "Let Us Cook : retour à l'accueil", onclick: (e) => { e.preventDefault(); resetHome(); } },
             h("img", { class: "brand-icon", src: "icons/icon-192.png?v=2", alt: "", width: "192", height: "192" }),
             ...brandParts())),
         settingsButton()),
@@ -1571,7 +1571,7 @@ function renderExtractPanel() {
     state.lastError && state.ocrText && h("details", { class: "ocr-text" }, h("summary", {}, "Voir le texte lu sur la photo"), h("pre", {}, state.ocrText.trim())),
     renderLog(),
     h("p", { class: "hint" }, "Pour un lien, dans Safari : Partager › Copier, puis revenez ici et touchez le bouton Coller."),
-    h("p", { class: "version" }, `letuscook · version ${APP_VERSION}${Native ? " · app iPhone" : ""}`),
+    h("p", { class: "version" }, `Let Us Cook · version ${APP_VERSION}${Native ? " · app iPhone" : ""}`),
   );
 }
 
@@ -1769,7 +1769,7 @@ function renderSearchPanel() {
       : `Recherche dans ${nChefs} recettes de chefs (aucun site de recherche activé dans les Réglages).`));
   }
 
-  parts.push(h("p", { class: "version" }, `letuscook · version ${APP_VERSION}${Native ? " · app iPhone" : ""}`));
+  parts.push(h("p", { class: "version" }, `Let Us Cook · version ${APP_VERSION}${Native ? " · app iPhone" : ""}`));
   return h("section", { "aria-label": "Chercher une recette" }, parts);
 }
 
@@ -2048,7 +2048,7 @@ function shareText(recipe, link) {
   if (recipe.chef) lines.push(`Recette du chef ${recipe.chef}`);
   const facts = [recipe.servings && `${recipe.servings} personnes`, recipe.totalTimeMin && formatMinutes(recipe.totalTimeMin)].filter(Boolean);
   if (facts.length) lines.push(facts.join(" · "));
-  lines.push("", `À ouvrir dans letuscook : ${link}`);
+  lines.push("", `À ouvrir dans Let Us Cook : ${link}`);
   if (recipe.ingredients && recipe.ingredients.length) {
     lines.push("", "INGRÉDIENTS");
     let sec;
@@ -2077,7 +2077,7 @@ async function openShare(recipe) {
   const enc = encodeURIComponent;
   const dlg = h("dialog", { class: "share-dlg", "aria-labelledby": "share-title" },
     h("h2", { id: "share-title", tabindex: "-1" }, "Partager la recette"),
-    h("p", { class: "site-help" }, `« ${recipe.title} » : la personne l'ouvre directement dans letuscook (et peut l'enregistrer), ou la lit en texte si elle n'a pas l'appli.`),
+    h("p", { class: "site-help" }, `« ${recipe.title} » : la personne l'ouvre directement dans Let Us Cook (et peut l'enregistrer), ou la lit en texte si elle n'a pas l'appli.`),
     h("div", { class: "share-opts" },
       navigator.share && opt("share", "Partager… (Messages, WhatsApp, Mail…)", async () => {
         try { await navigator.share({ title: subject, text }); close(); } catch { /* annulé */ }
@@ -2101,7 +2101,7 @@ async function openSharedLink(code) {
     const recipe = await decodeShare(code);
     const already = recipe.sourceUrl && findBySource(recipe.sourceUrl);
     state.preview = { ...recipe, extractedAt: new Date().toISOString() };
-    state.previewWarnings = [already ? "Recette partagée : vous l'avez déjà dans votre carnet." : "Recette partagée avec letuscook : touchez « Enregistrer » pour la garder dans votre carnet."];
+    state.previewWarnings = [already ? "Recette partagée : vous l'avez déjà dans votre carnet." : "Recette partagée avec Let Us Cook : touchez « Enregistrer » pour la garder dans votre carnet."];
     store.del("zbc.progress.apercu");
     state.returnTo = "";
     history.replaceState(null, "", "#/apercu");
@@ -2272,7 +2272,7 @@ function renderChefsPanel() {
     countLine,
     listBox,
     more,
-    h("p", { class: "version" }, `letuscook · version ${APP_VERSION}${Native ? " · app iPhone" : ""}`));
+    h("p", { class: "version" }, `Let Us Cook · version ${APP_VERSION}${Native ? " · app iPhone" : ""}`));
 }
 
 function renderCarnet() {
@@ -3035,7 +3035,7 @@ function renderRecipe(recipe, { saved }) {
   setActive(activeStep, false);
   updateCookBarVisibility();
   refreshWakeButton();
-  document.title = `${recipe.title} · letuscook`;
+  document.title = `${recipe.title} · Let Us Cook`;
 }
 
 /* ════════════ Réglages : sites de recherche ════════════ */
@@ -3262,7 +3262,7 @@ function openSettings() {
   $("#set-worker").value = worker;
   $("#set-worker").placeholder = ZBC.getWorkerUrl() || "https://zbc-relais.….workers.dev";
   $("#set-code").value = code;
-  $("#settings-version").textContent = `letuscook · version ${APP_VERSION}${Native ? " · app iPhone" : ""}`;
+  $("#settings-version").textContent = `Let Us Cook · version ${APP_VERSION}${Native ? " · app iPhone" : ""}`;
   sitesUI.editing = null; sitesUI.test = null;
   renderSitesManager();
   $("#set-gesture").value = store.get("zbc.gestureLevel", "normale");
