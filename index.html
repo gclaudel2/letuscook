@@ -413,6 +413,11 @@
   .step.active .n { background: var(--accent); color: var(--accent-ink); }
   .step-hint { color: var(--muted); font-size: 15px; margin: -2px 0 14px; }
 
+  .step-qty {
+    display: inline-block; margin: 0 1px 0 5px; padding: 0 7px; border-radius: 999px; vertical-align: 1px;
+    background: var(--accent-soft); color: var(--ink); font: 750 0.86em/1.5 var(--rounded); font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  .step.active .step-qty { background: color-mix(in srgb, var(--accent) 30%, transparent); }
   .step-timers { display: flex; flex-wrap: wrap; gap: 8px; margin: -4px 0 12px 68px; }
   .tm-chip {
     display: inline-flex; align-items: center; gap: 6px; height: 38px; padding: 0 14px;
@@ -701,14 +706,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.20.0"></script>
-<script src="extracteur.js?v=2.20.0"></script>
+<script src="config.js?v=2.21.0"></script>
+<script src="extracteur.js?v=2.21.0"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.20.0";
+const APP_VERSION = "2.21.0";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -2581,6 +2586,87 @@ function notesCard(recipe, saved) {
     area);
 }
 
+/* ════════════ Quantités rappelées dans les étapes ════════════ */
+/*
+ * « Ajouter la farine et les œufs » → « Ajouter la farine 250 g et les œufs 3 ».
+ * On retrouve chaque ingrédient de la liste dans le texte de l'étape (sans accents, singulier/pluriel),
+ * du nom le plus long au plus court (« sucre glace » avant « sucre »), une seule fois par étape.
+ * Pas de rappel si l'étape n'en utilise qu'une partie (« la moitié du sucre ») ou donne déjà une quantité.
+ */
+const foldChars = (s) => String(s).split("").map((c) => (c.normalize("NFD")[0] || c).toLowerCase()).join("");
+const ING_STOP = new Set(("de du des d l la le les et ou a au aux en un une pour avec sans bien tres plus petit petite petits petites gros grosse grosses " +
+  "grand grande grands grandes frais fraiche fraiches entier entiere entiers entieres moyen moyenne moyens moyennes mou molle doux douce bio " +
+  "rape rapee rapes rapees hache hachee haches hachees fondu fondue tiede froid froide chaud chaude surgele surgeles nature extra fin fine fines " +
+  "beau belle beaux belles bon bonne environ quelques cuillere cuilleres soupe cafe pincee g kg ml cl dl l").split(" "));
+
+const ingredientBaseName = (ing) => foldChars(String(ing.name || "").split(/[,(;:]| ou | pour /)[0]).replace(/[^a-z0-9œæ' -]+/g, " ").replace(/\s+/g, " ").trim();
+function ingredientKeys(ing) {
+  const name = foldChars(String(ing.name || "").split(/[,(;:]| ou | pour /)[0]).replace(/[^a-z0-9œæ' -]+/g, " ").replace(/\s+/g, " ").trim();
+  const words = name.split(/[\s'-]+/).filter((w) => w.length >= 3 && !ING_STOP.has(w) && !/^\d/.test(w));
+  const keys = [];
+  if (name.length >= 3 && words.length > 1 && name.split(" ").length <= 4) keys.push(name);
+  if (words[0]) keys.push(words[0]);
+  if (words.length > 1) keys.push(words[words.length - 1]);
+  return [...new Set(keys)];
+}
+const keyPattern = (key) => key.split(/\s+/).map((w) => {
+  const stem = w.length > 3 ? w.replace(/[sx]$/, "") : w;
+  return stem.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/œ|oe/g, "(?:œ|oe)").replace(/æ|ae/g, "(?:æ|ae)") + "(?:s|x|es)?";
+}).join("[\\s'’-]+");
+// « la moitié du sucre », « un filet d'huile », « 200 g de farine » : quantité déjà donnée ou partielle
+const PARTIAL_BEFORE = /(?:(?:moitie|reste|restant|tiers|quart|partie|un peu|filet|pincee|noix|noisette)[\s'’]+|\d[^\s.;!?]*\s+)(?:[^\s.;!?]+[\s'’]+){0,2}$/;
+
+/** → [{ start, end, idx }] : où citer quelle quantité dans le texte de l'étape. */
+function stepIngredientMarks(text, ingredients, section) {
+  const folded = foldChars(text);
+  const cands = [];
+  ingredients.forEach((ing, idx) => {
+    if (ing.quantity == null) return;
+    for (const key of ingredientKeys(ing)) cands.push({ idx, key });
+  });
+  // une même clé partagée par deux ingrédients (« sucre » de la pâte et de la crème) : on garde celui de la même rubrique, sinon personne
+  const byKey = new Map();
+  for (const c of cands) (byKey.get(c.key) || byKey.set(c.key, []).get(c.key)).push(c);
+  const usable = [];
+  for (const [key, list] of byKey) {
+    const ids = [...new Set(list.map((c) => c.idx))];
+    if (ids.length === 1) { usable.push({ key, idx: ids[0] }); continue; }
+    const same = ids.filter((i) => section && ingredients[i].section === section);
+    if (same.length === 1) { usable.push({ key, idx: same[0] }); continue; }
+    // « sucre » seul désigne l'ingrédient « sucre », pas « sucre glace »
+    const exact = ids.filter((i) => ingredientBaseName(ingredients[i]).replace(/[sx]$/, "") === key.replace(/[sx]$/, ""));
+    if (exact.length === 1) usable.push({ key, idx: exact[0] });
+  }
+  usable.sort((a, b) => b.key.length - a.key.length);
+  const taken = [], done = new Set(), marks = [];
+  for (const { key, idx } of usable) {
+    if (done.has(idx)) continue;
+    const re = new RegExp(`(?<![\\p{L}\\d])${keyPattern(key)}(?![\\p{L}])`, "gu");
+    for (const m of folded.matchAll(re)) {
+      const start = m.index, end = start + m[0].length;
+      if (taken.some(([a, b]) => start < b && end > a)) continue;
+      taken.push([start, end]);
+      done.add(idx);
+      if (!PARTIAL_BEFORE.test(folded.slice(Math.max(0, start - 28), start))) marks.push({ start, end, idx });
+      break;
+    }
+  }
+  return marks.sort((a, b) => a.start - b.start);
+}
+
+/** « 250 g », « 2 c. à s. », « 3 » */
+function stepQtyLabel(ing, f) {
+  const q = quantityLabel(ing, f);
+  if (!q) return "";
+  let unit = "";
+  if (ing.unit) {
+    const rest = String(ing.rest || ""), at = rest.toLowerCase().indexOf(String(ing.name || "").toLowerCase());
+    unit = (at > 0 ? rest.slice(0, at) : ing.unit).replace(/\s+(?:de|d['’]|of)\s*$/i, "").trim()
+      .replace(/cuill[eè]res?\s+[àa]\s+soupe/i, "c. à s.").replace(/cuill[eè]res?\s+[àa]\s+caf[eé]/i, "c. à c.");
+  }
+  return unit ? `${q} ${unit}` : q;
+}
+
 /* ════════════ Mode cuisine ════════════ */
 const MULTIPLIERS = [0.5, 1, 1.5, 2, 3, 4];
 
@@ -2683,6 +2769,7 @@ function renderRecipe(recipe, { saved }) {
   }
 
   /* Ingrédients */
+  const stepQtyEls = []; // quantités rappelées dans les étapes, mises à jour avec les portions
   const ingProgress = h("span", { class: "progress" });
   const ingItems = recipe.ingredients.map((ing, i) => {
     const qtyEl = h("span", { class: "qty" });
@@ -2728,10 +2815,25 @@ function renderRecipe(recipe, { saved }) {
     resetBtn.hidden = !changed;
     resetBtn.textContent = base ? `Revenir à ${base} ${base > 1 ? "personnes" : "personne"}` : "Revenir aux quantités d'origine";
     ingItems.forEach((li) => li._update(f));
+    stepQtyEls.forEach(({ el, ing }) => { el.textContent = stepQtyLabel(ing, f); });
     persist();
   }
 
   /* Étapes */
+  const stepMarks = recipe.steps.map((st) => { try { return stepIngredientMarks(st.text, recipe.ingredients, st.section); } catch { return []; } });
+  function stepTextNodes(step, i) {
+    const out = [];
+    let pos = 0;
+    for (const m of stepMarks[i]) {
+      const ing = recipe.ingredients[m.idx];
+      const el = h("span", { class: "step-qty" }, stepQtyLabel(ing, factor()));
+      stepQtyEls.push({ el, ing });
+      out.push(step.text.slice(pos, m.end), el);
+      pos = m.end;
+    }
+    out.push(step.text.slice(pos));
+    return out;
+  }
   const stepButtons = [];
   const stepNodes = [];
   let lastSection;
@@ -2740,7 +2842,7 @@ function renderRecipe(recipe, { saved }) {
     lastSection = step.section;
     const btn = h("button", { class: "step", type: "button", onclick: () => setActive(activeStep === i ? -1 : i) },
       h("span", { class: "n", "aria-hidden": "true" }, String(i + 1)),
-      h("span", { class: "t" }, h("span", { class: "sr-only" }, `Étape ${i + 1} : `), step.text));
+      h("span", { class: "t" }, h("span", { class: "sr-only" }, `Étape ${i + 1} : `), ...stepTextNodes(step, i)));
     stepButtons.push(btn);
     stepNodes.push(h("li", {}, btn, stepTimerChips(step, i, recipe)));
   });
@@ -2760,7 +2862,13 @@ function renderRecipe(recipe, { saved }) {
 
   /* Barre mains libres (en bas de l'écran) */
   const stepsTitle = h("div", { class: "section-title" }, h("h2", {}, "Préparation"));
-  const stepSpeech = (i) => (recipe.steps[i] ? `Étape ${i + 1}. ${recipe.steps[i].text}` : "");
+  const stepSpeech = (i) => {
+    const st = recipe.steps[i];
+    if (!st) return "";
+    let text = "", pos = 0;
+    for (const m of stepMarks[i] || []) { text += `${st.text.slice(pos, m.end)} (${stepQtyLabel(recipe.ingredients[m.idx], factor())})`; pos = m.end; }
+    return `Étape ${i + 1}. ${text}${st.text.slice(pos)}`;
+  };
   const goStep = (i) => {
     if (!recipe.steps.length) return;
     if (i >= recipe.steps.length) { toast("C'était la dernière étape. Bon appétit !"); HandsFree.speak("C'était la dernière étape. Bon appétit !"); return; }
