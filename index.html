@@ -706,14 +706,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.21.0"></script>
-<script src="extracteur.js?v=2.21.0"></script>
+<script src="config.js?v=2.21.1"></script>
+<script src="extracteur.js?v=2.21.1"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.21.0";
+const APP_VERSION = "2.21.1";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -2099,27 +2099,46 @@ function rememberSearch(q) {
 function rememberView(recipe, saved) {
   const key = recipe.sourceUrl || recipe.id || recipe.title;
   if (!key) return;
+  // Toujours une copie de la recette (même enregistrée : elle reste ouvrable si on la supprime du carnet),
+  // sans la photo prise avec le téléphone, trop lourde pour la mémoire du navigateur
+  let copy = { ...recipe };
+  delete copy.my;
+  if (typeof copy.image === "string" && copy.image.startsWith("data:")) delete copy.image;
+  if (JSON.stringify(copy).length > 200000) copy = undefined;
   const entry = {
-    key, title: recipe.title, site: recipe.siteName || "", image: recipe.image || "",
-    savedId: saved ? recipe.id : undefined, at: Date.now(),
-    recipe: saved ? undefined : { ...recipe },
+    key, title: recipe.title, site: recipe.siteName || "", image: safeHttpUrl(recipe.image) || "",
+    savedId: saved ? recipe.id : undefined, at: Date.now(), recipe: copy,
   };
-  if (entry.recipe && JSON.stringify(entry.recipe).length > 150000) entry.recipe = undefined; // trop lourde (photo) : on la rouvrira par son lien
   const list = store.get(RECENT_VIEWS, []).filter((x) => x.key !== key);
   store.set(RECENT_VIEWS, [entry, ...list].slice(0, 10));
 }
 
 function openRecentView(v) {
-  const saved = (v.savedId && state.recipes.find((r) => r.id === v.savedId)) || (v.key && findBySource(v.key));
-  if (saved) return go(`#/r/${encodeURIComponent(saved.id)}`);
-  if (v.recipe) {
-    state.preview = { ...v.recipe };
-    state.previewWarnings = [];
-    store.del("zbc.progress.apercu");
+  try {
+    state.search.scrollY = window.scrollY;
     state.returnTo = "";
-    return go("#/apercu");
+    const saved = (v.savedId && state.recipes.find((r) => r.id === v.savedId)) || (v.key && findBySource(v.key))
+      || (v.recipe?.sourceUrl && findBySource(v.recipe.sourceUrl));
+    if (saved) return go(`#/r/${encodeURIComponent(saved.id)}`);
+    if (v.recipe && Array.isArray(v.recipe.steps)) {
+      const copy = { ...v.recipe };
+      if (v.savedId && copy.id === v.savedId) delete copy.id; // supprimée du carnet : on la rouvre en aperçu
+      state.preview = copy;
+      state.previewWarnings = [];
+      store.del("zbc.progress.apercu");
+      if (location.hash === "#/apercu") return route();
+      return go("#/apercu");
+    }
+    const url = /^https?:/.test(v.key) ? v.key : v.recipe?.sourceUrl;
+    if (url) return openResult({ url, title: v.title, image: v.image, site: v.site, status: "pending" });
+    // Plus rien pour la rouvrir (recette photo supprimée du carnet…) : on le dit et on l'enlève de la liste
+    store.set(RECENT_VIEWS, store.get(RECENT_VIEWS, []).filter((x) => x.key !== v.key));
+    toast("Cette recette n'est plus disponible (supprimée du carnet).");
+    renderHome();
+  } catch (err) {
+    console.error("openRecentView", err);
+    toast(`Impossible d'ouvrir cette recette : ${err.message || err}`);
   }
-  if (/^https?:/.test(v.key)) openResult({ url: v.key, title: v.title, image: v.image, site: v.site, status: "pending" });
 }
 
 function renderHistory() {
