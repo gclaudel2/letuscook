@@ -706,14 +706,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.21.2"></script>
-<script src="extracteur.js?v=2.21.2"></script>
+<script src="config.js?v=2.21.3"></script>
+<script src="extracteur.js?v=2.21.3"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.21.2";
+const APP_VERSION = "2.21.3";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1571,7 +1571,7 @@ function renderExtractPanel() {
     state.lastError && state.ocrText && h("details", { class: "ocr-text" }, h("summary", {}, "Voir le texte lu sur la photo"), h("pre", {}, state.ocrText.trim())),
     renderLog(),
     h("p", { class: "hint" }, "Pour un lien, dans Safari : Partager › Copier, puis revenez ici et touchez le bouton Coller."),
-    h("p", { class: "version" }, `letuscook · version ${APP_VERSION}`),
+    h("p", { class: "version" }, `letuscook · version ${APP_VERSION}${Native ? " · app iPhone" : ""}`),
   );
 }
 
@@ -1769,7 +1769,7 @@ function renderSearchPanel() {
       : `Recherche dans ${nChefs} recettes de chefs (aucun site de recherche activé dans les Réglages).`));
   }
 
-  parts.push(h("p", { class: "version" }, `letuscook · version ${APP_VERSION}`));
+  parts.push(h("p", { class: "version" }, `letuscook · version ${APP_VERSION}${Native ? " · app iPhone" : ""}`));
   return h("section", { "aria-label": "Chercher une recette" }, parts);
 }
 
@@ -2268,7 +2268,7 @@ function renderChefsPanel() {
     countLine,
     listBox,
     more,
-    h("p", { class: "version" }, `letuscook · version ${APP_VERSION}`));
+    h("p", { class: "version" }, `letuscook · version ${APP_VERSION}${Native ? " · app iPhone" : ""}`));
 }
 
 function renderCarnet() {
@@ -3250,7 +3250,7 @@ function openSettings() {
   $("#set-worker").value = worker;
   $("#set-worker").placeholder = ZBC.getWorkerUrl() || "https://zbc-relais.….workers.dev";
   $("#set-code").value = code;
-  $("#settings-version").textContent = `letuscook · version ${APP_VERSION}`;
+  $("#settings-version").textContent = `letuscook · version ${APP_VERSION}${Native ? " · app iPhone" : ""}`;
   sitesUI.editing = null; sitesUI.test = null;
   renderSitesManager();
   $("#set-gesture").value = store.get("zbc.gestureLevel", "normale");
