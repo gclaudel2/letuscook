@@ -701,14 +701,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.19.5"></script>
-<script src="extracteur.js?v=2.19.5"></script>
+<script src="config.js?v=2.20.0"></script>
+<script src="extracteur.js?v=2.20.0"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.19.5";
+const APP_VERSION = "2.20.0";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -871,12 +871,19 @@ async function deleteRecipe(id) {
 }
 
 /* ════════════ Écran allumé (Wake Lock) ════════════ */
+/* App iPhone letuscook (WKWebView) : pont vers les fonctions natives (notifications des minuteurs, écran allumé) */
+const Native = (() => {
+  const handler = window.webkit?.messageHandlers?.letuscook;
+  return handler ? { post(msg) { try { handler.postMessage(msg); } catch { /* app absente */ } } } : null;
+})();
+
 const Wake = {
-  supported: "wakeLock" in navigator,
+  supported: !!Native || "wakeLock" in navigator,
   wanted: false,
   sentinel: null,
   async enable(silent = false) {
     this.wanted = true;
+    if (Native) { Native.post({ type: "wake", on: true }); refreshWakeButton(); return; }
     try {
       this.sentinel = await navigator.wakeLock.request("screen");
       this.sentinel.addEventListener("release", () => { this.sentinel = null; refreshWakeButton(); });
@@ -889,6 +896,7 @@ const Wake = {
   },
   async disable() {
     this.wanted = false;
+    if (Native) Native.post({ type: "wake", on: false });
     const s = this.sentinel;
     this.sentinel = null;
     if (s) await s.release().catch(() => {});
@@ -897,7 +905,7 @@ const Wake = {
 };
 // iOS relâche le verrou quand l'appli passe en arrière-plan : on le reprend au retour
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && Wake.wanted && !Wake.sentinel) Wake.enable();
+  if (document.visibilityState === "visible" && Wake.wanted && !Wake.sentinel && !Native) Wake.enable();
 });
 function refreshWakeButton() {
   const btn = $("#btn-wake");
@@ -2372,7 +2380,11 @@ const Timers = {
     this.list = Array.isArray(raw) ? raw.filter((t) => t && t.total) : [];
     this.render(); this.schedule();
   },
-  save() { store.set("zbc.timers", this.list); },
+  save() {
+    store.set("zbc.timers", this.list);
+    // Dans l'app iPhone : une vraie notification sonnera à l'heure, même écran éteint ou appli fermée
+    Native?.post({ type: "timers", list: this.list.filter((t) => !t.done && t.left == null).map((t) => ({ id: t.id, endAt: t.endAt, name: t.name, recipe: t.recipeTitle || "" })) });
+  },
   remaining(t) { return t.left != null ? t.left : t.endAt - Date.now(); },
   start({ ms, name, step, recipeId, recipeTitle }) {
     Sound.unlock(); // pendant le toucher : seule occasion où le téléphone autorise la sonnerie plus tard
