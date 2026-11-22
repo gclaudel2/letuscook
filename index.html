@@ -706,14 +706,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.21.1"></script>
-<script src="extracteur.js?v=2.21.1"></script>
+<script src="config.js?v=2.21.2"></script>
+<script src="extracteur.js?v=2.21.2"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.21.1";
+const APP_VERSION = "2.21.2";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -876,6 +876,37 @@ async function deleteRecipe(id) {
 }
 
 /* ════════════ Écran allumé (Wake Lock) ════════════ */
+/* ════════════ Mise à jour automatique ════════════ */
+/*
+ * L'app iPhone (et parfois Safari) garde la page en cache jusqu'à 10 min : à l'ouverture et à chaque retour
+ * dans l'appli, on regarde si une version plus récente est publiée. Si oui, on recharge (adresse avec ?v= pour
+ * contourner le cache), mais jamais au milieu d'une recette : on attend le retour à l'accueil.
+ */
+const Updater = {
+  latest: null, checkedAt: 0,
+  async check() {
+    if (Date.now() - this.checkedAt < 60_000 || navigator.onLine === false) return;
+    this.checkedAt = Date.now();
+    try {
+      const res = await fetch(`${location.pathname}?check=${Date.now()}`, { cache: "no-store" });
+      const m = /const APP_VERSION = "([\d.]+)"/.exec(await res.text());
+      const newer = (a, b) => { const x = a.split(".").map(Number), y = b.split(".").map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return false; };
+      if (m && newer(m[1], APP_VERSION)) { this.latest = m[1]; this.applyIfIdle(); }
+    } catch { /* hors ligne : on réessaiera */ }
+  },
+  applyIfIdle() {
+    if (!this.latest || /^#\/(r\/|apercu)/.test(location.hash)) return;
+    try { // une seule tentative par version : pas de boucle si le serveur tarde à servir la nouvelle page
+      if (sessionStorage.getItem("zbc.updateTried") === this.latest) return;
+      sessionStorage.setItem("zbc.updateTried", this.latest);
+    } catch { return; }
+    location.replace(`${location.pathname}?v=${this.latest}${location.hash}`);
+  },
+};
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") Updater.check(); });
+window.addEventListener("hashchange", () => Updater.applyIfIdle());
+setTimeout(() => Updater.check(), 3000);
+
 /* App iPhone letuscook (WKWebView) : pont vers les fonctions natives (notifications des minuteurs, écran allumé) */
 const Native = (() => {
   const handler = window.webkit?.messageHandlers?.letuscook;

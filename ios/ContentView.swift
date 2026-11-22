@@ -41,7 +41,8 @@ struct WebView: UIViewRepresentable {
         web.backgroundColor = slate
         web.isInspectable = true                                // débogage depuis Safari sur le Mac
         context.coordinator.web = web
-        web.load(URLRequest(url: appURL))
+        // Toujours la dernière version publiée (sans ça, la page peut rester 10 min en cache)
+        web.load(URLRequest(url: appURL, cachePolicy: .reloadRevalidatingCacheData))
         return web
     }
 
