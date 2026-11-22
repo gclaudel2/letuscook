@@ -706,14 +706,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.21.3"></script>
-<script src="extracteur.js?v=2.21.3"></script>
+<script src="config.js?v=2.21.4"></script>
+<script src="extracteur.js?v=2.21.4"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.21.3";
+const APP_VERSION = "2.21.4";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -2127,6 +2127,9 @@ function rememberSearch(q) {
 }
 
 /** Recette ouverte → en tête des « dernières recettes vues » (copie gardée si elle n'est pas dans le carnet). */
+// Vignette pour l'historique : adresse web, ou petite photo intégrée (recette prise en photo) si elle est légère
+const smallImage = (u) => safeHttpUrl(u) || (typeof u === "string" && u.length <= 80000 ? safeImageUrl(u) : null) || "";
+
 function rememberView(recipe, saved) {
   const key = recipe.sourceUrl || recipe.id || recipe.title;
   if (!key) return;
@@ -2134,10 +2137,10 @@ function rememberView(recipe, saved) {
   // sans la photo prise avec le téléphone, trop lourde pour la mémoire du navigateur
   let copy = { ...recipe };
   delete copy.my;
-  if (typeof copy.image === "string" && copy.image.startsWith("data:")) delete copy.image;
+  if (typeof copy.image === "string" && copy.image.startsWith("data:") && copy.image.length > 80000) delete copy.image;
   if (JSON.stringify(copy).length > 200000) copy = undefined;
   const entry = {
-    key, title: recipe.title, site: recipe.siteName || "", image: safeHttpUrl(recipe.image) || "",
+    key, title: recipe.title, site: recipe.siteName || "", image: smallImage(recipe.image),
     savedId: saved ? recipe.id : undefined, at: Date.now(), recipe: copy,
   };
   const list = store.get(RECENT_VIEWS, []).filter((x) => x.key !== key);
@@ -2187,7 +2190,8 @@ function renderHistory() {
       h("button", { type: "button", class: "link-btn", onclick: () => { store.del(RECENT_VIEWS); renderHome(); } }, "Effacer")));
     out.push(h("ul", { class: "results recent-views" }, views.map((v) => h("li", {},
       h("button", { class: "result", type: "button", onclick: () => openRecentView(v) },
-        thumbWithImage("r-thumb", safeImageUrl(v.image), (v.title || "?").trim().charAt(0).toUpperCase()),
+        thumbWithImage("r-thumb", safeImageUrl(v.image || (v.savedId && state.recipes.find((r) => r.id === v.savedId)?.image) || v.recipe?.image || (v.key && findBySource(v.key)?.image)),
+          (v.title || "?").trim().charAt(0).toUpperCase()),
         h("div", { class: "r-body" },
           h("div", { class: "r-name" }, v.title),
           h("div", { class: "r-meta" }, h("span", {}, v.site || "Recette"),
@@ -2339,8 +2343,16 @@ function thumbWithImage(cls, url, letter, onFail) {
   const entry = pooledImage(url);
   if (entry.state === "failed") { if (onFail) onFail(); return thumb; }
   if (onFail) entry.fails.push(onFail);
-  thumb.append(entry.img); // déplace l'image déjà chargée dans la nouvelle carte
-  if (entry.state === "ok" || (entry.img.complete && entry.img.naturalWidth)) { entry.state = "ok"; entry.img.classList.remove("loading"); initial.remove(); }
+  // La même photo peut être affichée deux fois sur la page (résultats + vues récemment) : copie dans ce cas,
+  // sinon l'image serait déplacée et l'autre carte perdrait sa photo
+  let img = entry.img;
+  if (img.isConnected) {
+    img = entry.img.cloneNode(true);
+    img.addEventListener("load", () => { if (img.naturalWidth) { img.classList.remove("loading"); initial.remove(); } });
+    img.addEventListener("error", () => img.remove());
+  }
+  thumb.append(img); // déplace (ou copie) l'image déjà chargée dans la nouvelle carte
+  if (entry.state === "ok" || (img.complete && img.naturalWidth)) { entry.state = "ok"; img.classList.remove("loading"); initial.remove(); }
   return thumb;
 }
 
