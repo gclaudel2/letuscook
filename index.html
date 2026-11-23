@@ -544,7 +544,9 @@
   .faim-dots span.done, .faim-dots span.on { background: var(--accent); }
   .faim-q { font: 750 19px/1.3 var(--rounded); margin: 0 0 12px; }
   .faim-q small { font-weight: 500; color: var(--muted); font-size: 14px; }
-  .faim-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .faim-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .faim-tile { min-width: 0; }
+  .faim-dlg { overflow-x: hidden; }
   .faim-tiles .faim-tile:last-child:nth-child(odd) { grid-column: 1 / -1; }
   .faim-tile {
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-height: 104px; padding: 12px 8px;
@@ -553,6 +555,11 @@
   .faim-tile strong { font: 750 17px/1.2 var(--rounded); }
   .faim-tile small { color: var(--muted); font-size: 13.5px; line-height: 1.25; }
   .faim-tile[aria-pressed="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, var(--surface)); }
+  .faim-tiles.compact .faim-tile { min-height: 62px; flex-direction: row; justify-content: flex-start; gap: 10px; padding: 8px 12px; text-align: left; }
+  .faim-tiles.compact .faim-tile > span:last-child { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .faim-tiles.compact .faim-emoji { font-size: 26px; }
+  .faim-tiles.compact .faim-tile small { font-size: 12.5px; }
+  .faim-q2 { margin-top: 22px; }
   .faim-times { display: grid; gap: 8px; }
   .faim-times .faim-tile { min-height: 52px; flex-direction: row; }
   .faim-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 14px; }
@@ -566,7 +573,8 @@
   .faim-pill svg { width: 16px; height: 16px; }
   .faim-body .url-row .btn { height: 56px; flex: none; padding: 0 16px; }
   .filter:disabled { opacity: .4; }
-  .faim-actions { display: flex; gap: 10px; margin-top: 18px; }
+  .faim-actions { display: flex; gap: 10px; margin: 18px 0 -22px; position: sticky; bottom: -22px; padding: 12px 0 22px; background: var(--bg); border-top: 1px solid var(--line); }
+  .faim-dlg { background-clip: padding-box; }
   .faim-actions .btn { flex: 1; margin: 0; padding: 0 12px; white-space: nowrap; font-size: 17px; }
   .faim-actions .btn.primary { flex: 2; }
   .r-footer { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; max-width: 520px; margin: 30px auto 0; }
@@ -853,14 +861,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.30.0"></script>
-<script src="extracteur.js?v=2.30.0"></script>
+<script src="config.js?v=2.30.1"></script>
+<script src="extracteur.js?v=2.30.1"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.30.0";
+const APP_VERSION = "2.30.1";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -3334,40 +3342,40 @@ function openFaim() {
     dots, body, h("div", { class: "faim-actions" }, back, next));
   const tile = (selected, onclick, ...kids) => h("button", { type: "button", class: "faim-tile", "aria-pressed": String(!!selected), onclick }, ...kids);
   const chipBtn = (selected, label, onclick) => h("button", { type: "button", class: "filter", "aria-pressed": String(!!selected), onclick }, label);
+  const styleBlock = () => [h("p", { class: "faim-q" }, "De quoi avez-vous envie\u00a0?"),
+    h("div", { class: "faim-tiles compact" }, FAIM_STYLES.map((s) => tile(m.style === s.id, () => { m.style = m.style === s.id ? "" : s.id; draw(); },
+      h("span", { class: "faim-emoji" }, s.emoji), h("span", {}, h("strong", {}, s.label), h("small", {}, s.sub))))),
+    h("button", { type: "button", class: "btn faim-surprise", onclick: () => {
+      Object.assign(m, { style: pick(FAIM_STYLES).id, ingredients: [], times: [], type: "plat" });
+      finish();
+    } }, "🎲 Surprends-moi")];
   const steps = [
-    () => [h("p", { class: "faim-q" }, "De quoi avez-vous envie\u00a0?"),
-      h("div", { class: "faim-tiles" }, FAIM_STYLES.map((s) => tile(m.style === s.id, () => { m.style = s.id; goStep(1); },
-        h("span", { class: "faim-emoji" }, s.emoji), h("strong", {}, s.label), h("small", {}, s.sub)))),
-      h("button", { type: "button", class: "btn faim-surprise", onclick: () => {
-        Object.assign(m, { style: pick(FAIM_STYLES).id, ingredients: [], times: [], type: "plat" });
-        finish();
-      } }, "🎲 Surprends-moi")],
     () => {
       const MAX = 3;
       const has = (x) => m.ingredients.some((y) => foldChars(y) === foldChars(x));
-      const add = (raw) => {
+      const add = (raw, fromInput = false) => {
         for (const x of String(raw).split(/[,;+]|\bet\b/).map((t) => t.trim()).filter(Boolean)) {
           if (m.ingredients.length >= MAX) { toast("3 ingrédients maximum"); break; }
           if (!has(x)) m.ingredients.push(x.slice(0, 30));
         }
         draw();
-        body.querySelector(".faim-ing-input")?.focus();
+        if (fromInput) body.querySelector(".faim-ing-input")?.focus(); // le clavier ne s'ouvre que si on tapait
       };
       const remove = (x) => { m.ingredients = m.ingredients.filter((y) => y !== x); draw(); };
       const full = m.ingredients.length >= MAX;
       const input = h("input", { class: "input faim-ing-input", type: "text", enterkeyhint: "done", disabled: full,
-        placeholder: full ? "3 ingrédients maximum" : m.ingredients.length ? "Un autre ? (facultatif)" : "Ex. champignons, œuf…",
-        onkeydown: (e) => { if (e.key === "Enter") { e.preventDefault(); if (e.target.value.trim()) add(e.target.value); else goStep(2); } } });
+        placeholder: full ? "3 ingrédients maximum" : m.ingredients.length ? "Un autre ?" : "Ex. champignons, œuf…",
+        onkeydown: (e) => { if (e.key === "Enter") { e.preventDefault(); if (e.target.value.trim()) add(e.target.value, true); else e.target.blur(); } } });
       const season = seasonNow().filter((p) => (m.type === "dessert" ? FRUITS.has(p) : true)).slice(0, 8);
-      const common = m.style === "saison" ? [] : ["poulet", "bœuf", "saumon", "crevettes", "œufs", "champignons", "pâtes", "riz", "fromage", "chocolat"];
+      const common = (m.style === "saison" ? [] : ["poulet", "bœuf", "saumon", "crevettes", "œufs", "champignons", "pâtes", "riz", "fromage", "chocolat"]).filter((x) => !season.includes(x));
       const chips = (title, list) => list.length ? [h("span", { class: "field-label" }, title), h("div", { class: "filters faim-chips" }, list.map((x) =>
         h("button", { type: "button", class: "filter", "aria-pressed": String(has(x)), disabled: full && !has(x),
           onclick: () => (has(x) ? remove(m.ingredients.find((y) => foldChars(y) === foldChars(x))) : add(x)) }, x)))] : [];
-      return [h("p", { class: "faim-q" }, "Des ingrédients à utiliser\u00a0?", h("small", {}, " jusqu'à 3, facultatif")),
+      return [...styleBlock(), h("p", { class: "faim-q faim-q2" }, "Avec quels ingrédients\u00a0?", h("small", {}, " jusqu'à 3, facultatif")),
         m.ingredients.length ? h("div", { class: "faim-picked" }, m.ingredients.map((x) =>
           h("button", { type: "button", class: "faim-pill", "aria-label": `Retirer ${x}`, onclick: () => remove(x) }, x, icon("close")))) : null,
         full ? h("p", { class: "site-help" }, "C'est le maximum : touchez un ingrédient pour le retirer.")
-          : h("div", { class: "url-row" }, input, h("button", { type: "button", class: "btn", onclick: () => { if (input.value.trim()) add(input.value); else input.focus(); } }, "Ajouter")),
+          : h("div", { class: "url-row" }, input, h("button", { type: "button", class: "btn", onclick: () => { if (input.value.trim()) add(input.value, true); else input.focus(); } }, "Ajouter")),
         ...chips("De saison en ce moment", season), ...chips("Idées", common)];
     },
     () => [h("p", { class: "faim-q" }, "Combien de temps voulez-vous y consacrer\u00a0?"),
@@ -3396,13 +3404,12 @@ function openFaim() {
   function draw() {
     body.replaceChildren(...steps[step]());
     dots.replaceChildren(...steps.map((_, i) => h("span", { class: i === step ? "on" : i < step ? "done" : "" })));
-    back.style.visibility = step === 0 ? "hidden" : "visible";
-    next.hidden = step === 0;
-    next.textContent = step === steps.length - 1 ? "C'est parti\u00a0!" : step === 1 && !m.ingredients.length ? "Peu importe" : "Suivant";
+    back.hidden = step === 0;
+    next.textContent = step === steps.length - 1 ? "C'est parti\u00a0!" : "Suivant";
   }
   function goStep(i) {
     if (i < 0) return;
-    const typed = step === 1 && body.querySelector(".faim-ing-input")?.value.trim();
+    const typed = step === 0 && body.querySelector(".faim-ing-input")?.value.trim();
     if (typed && m.ingredients.length < 3) m.ingredients.push(typed.slice(0, 30));
     if (i >= steps.length) return finish();
     step = i; draw(); body.scrollTop = 0;
