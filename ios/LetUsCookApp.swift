@@ -1,5 +1,5 @@
 // letuscook — app iPhone
-// Remplacez TOUT le contenu du fichier « letuscookApp.swift » de votre projet Xcode par ce fichier.
+// Point d entrée de l app.
 
 import SwiftUI
 import UserNotifications
@@ -11,6 +11,8 @@ struct LetUsCookApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                // Lien d'invitation touché dans Messages, WhatsApp, Mail… (lien universel du relais)
+                .onOpenURL { LinkRouter.open($0) }
         }
     }
 }

@@ -1,5 +1,5 @@
 // Let Us Cook — app iPhone
-// Remplacez TOUT le contenu du fichier « ContentView.swift » de votre projet Xcode par ce fichier.
+// Écran principal : letuscook dans une vue web, plus les fonctions natives.
 //
 // L'app affiche letuscook (le site GitHub Pages) et ajoute ce qu'un site web ne peut pas faire :
 //  • les minuteurs deviennent de vraies notifications : elles sonnent écran éteint ou appli fermée ;
@@ -13,8 +13,31 @@ import UserNotifications
 let appURL = URL(string: "https://gclaudel2.github.io/letuscook/")!
 let appHost = "gclaudel2.github.io"
 // Clé de l'app pour le relais Cloudflare (secret APP_KEY) : sans code d'accès, et le relais refuse l'IA
-let relayAppKey = "CLE_APP_KEY_DU_RELAIS" // la vraie clé est seulement dans le projet sur le Mac (secret APP_KEY sur Cloudflare)
+let relayAppKey = "CLE_APP_KEY_DU_RELAIS"
 let slate = UIColor(red: 0x1F / 255, green: 0x2A / 255, blue: 0x26 / 255, alpha: 1)
+
+// ── Liens qui ouvrent l'app : https://<relais>/rejoindre/<carnet>.<code> → page « rejoindre » de letuscook ──
+enum LinkRouter {
+    static let notification = Notification.Name("letuscook.openLink")
+    static var pending: URL?          // lien reçu avant que la page soit prête (app lancée par le lien)
+
+    static func pageURL(for link: URL) -> URL? {
+        let path = link.path
+        if path.hasPrefix("/rejoindre/") {
+            let code = String(path.dropFirst("/rejoindre/".count))
+            guard code.range(of: "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$", options: .regularExpression) != nil else { return nil }
+            return URL(string: appURL.absoluteString + "#/rejoindre/" + code)
+        }
+        if link.host == appHost { return link }
+        return nil
+    }
+
+    static func open(_ link: URL) {
+        guard let url = pageURL(for: link) else { return }
+        pending = url
+        NotificationCenter.default.post(name: notification, object: url)
+    }
+}
 
 struct ContentView: View {
     var body: some View {
@@ -50,7 +73,9 @@ struct WebView: UIViewRepresentable {
         #endif
         context.coordinator.web = web
         // Toujours la dernière version publiée (sans ça, la page peut rester 10 min en cache)
-        web.load(URLRequest(url: appURL, cachePolicy: .reloadRevalidatingCacheData))
+        web.load(URLRequest(url: LinkRouter.pending ?? appURL, cachePolicy: .reloadRevalidatingCacheData))
+        LinkRouter.pending = nil
+        context.coordinator.listenForLinks()
         return web
     }
 
@@ -60,6 +85,16 @@ struct WebView: UIViewRepresentable {
 @MainActor
 final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate, WKUIDelegate {
     weak var web: WKWebView?
+
+    func listenForLinks() {
+        NotificationCenter.default.addObserver(forName: LinkRouter.notification, object: nil, queue: .main) { [weak self] note in
+            guard let url = note.object as? URL else { return }
+            MainActor.assumeIsolated {
+                LinkRouter.pending = nil
+                self?.web?.load(URLRequest(url: url, cachePolicy: .reloadRevalidatingCacheData))
+            }
+        }
+    }
 
     // ── Messages envoyés par la page (window.webkit.messageHandlers.letuscook) ──
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
