@@ -1,5 +1,5 @@
 /*
- * Zéro Blabla Cuisine — relais Cloudflare Worker (un seul fichier, à coller dans le tableau de bord)
+ * Let Us Cook — relais Cloudflare Worker (un seul fichier, à coller dans le tableau de bord)
  *
  * Pourquoi un relais ? Une page GitHub Pages ne peut pas lire le HTML d'un autre site (règle CORS
  * des navigateurs), et une clé d'API IA ne doit jamais être dans une page publique.
@@ -14,6 +14,8 @@
  * Variables (Settings → Variables and Secrets) :
  *   ALLOWED_ORIGINS    ex. "https://votre-compte.github.io"  (plusieurs : séparées par des virgules)
  *   ACCESS_CODE        facultatif mais conseillé : code à saisir une fois dans l'appli   [Secret]
+ *   APP_KEY            clé de l'app iPhone « Let Us Cook » (App Store) : remplace le code d'accès  [Secret]
+ *                      Les demandes faites avec cette clé n'ont jamais accès à l'IA (/ia, /photo, /voix).
  *   Clés IA, toutes facultatives [Secret]. Avec plusieurs clés, le relais les essaie à tour de rôle
  *   si l'une est en panne ou saturée :
  *     GEMINI_API_KEY     (Google AI Studio, gratuit)   GEMINI_MODEL    défaut : gemini-flash-latest
@@ -73,7 +75,7 @@ function corsHeaders(request) {
     ? {
         "access-control-allow-origin": origin,
         "access-control-allow-methods": "POST, OPTIONS",
-        "access-control-allow-headers": "content-type, x-access-code",
+        "access-control-allow-headers": "content-type, x-access-code, x-app-key",
         "access-control-max-age": "86400",
         vary: "origin",
       }
@@ -123,13 +125,24 @@ async function sha256(s) {
   return new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)));
 }
 
-async function checkAccess(request, env) {
-  if (!env.ACCESS_CODE) return;
-  const [a, b] = await Promise.all([sha256(request.headers.get("x-access-code") || ""), sha256(env.ACCESS_CODE)]);
+async function sameSecret(given, expected) {
+  const [a, b] = await Promise.all([sha256(given || ""), sha256(expected)]);
   let diff = 0;
   for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
-  if (diff !== 0) throw new RelayError("UNAUTHORIZED", "Code d'accès manquant ou incorrect (Réglages de l'appli).", 401);
+  return diff === 0;
 }
+
+/** → { app: true } pour l'app App Store (clé APP_KEY), { app: false } sinon. */
+async function checkAccess(request, env) {
+  const appKey = request.headers.get("x-app-key");
+  if (appKey && env.APP_KEY && await sameSecret(appKey, env.APP_KEY)) return { app: true };
+  if (appKey && !env.ACCESS_CODE && !env.APP_KEY) return { app: true }; // clé non encore configurée : pas d'IA non plus
+  if (env.ACCESS_CODE && !(await sameSecret(request.headers.get("x-access-code"), env.ACCESS_CODE))) {
+    throw new RelayError("UNAUTHORIZED", "Code d'accès manquant ou incorrect (Réglages de l'appli).", 401);
+  }
+  return { app: !!appKey };
+}
+const AI_ROUTES = new Set(["/ia", "/photo", "/voix"]);
 
 // ── /page : récupération sécurisée ───────────────────────────────
 function assertAllowedUrl(raw) {
@@ -766,7 +779,7 @@ export default {
 
     const { pathname } = new URL(request.url);
     try {
-      if (request.method !== "POST") throw new RelayError("NOT_FOUND", "Relais Zéro Blabla Cuisine : utilisez POST /page, /ia, /voix, /liens, /apercus ou /photo.", 404);
+      if (request.method !== "POST") throw new RelayError("NOT_FOUND", "Relais Let Us Cook : utilisez POST /page, /ia, /voix, /liens, /apercus ou /photo.", 404);
       const origin = request.headers.get("origin") || "";
       if (!isAllowedOrigin(origin, env)) {
         throw new RelayError(
@@ -775,7 +788,9 @@ export default {
           403,
         );
       }
-      await checkAccess(request, env);
+      const access = await checkAccess(request, env);
+      // L'app App Store n'utilise jamais l'IA (conditions de Gemini : pas d'app publique en Europe ni pour les moins de 18 ans)
+      if (access.app && AI_ROUTES.has(pathname)) throw new RelayError("AI_DISABLED", "Les fonctions IA ne sont pas disponibles dans l'app.", 403);
       const body = await request.json().catch(() => null);
       if (pathname === "/page") return json(await handlePage(body, env), 200, cors);
       if (pathname === "/ia") return streamedJson(() => handleAi(body, env), cors, ctx);

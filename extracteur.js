@@ -21,6 +21,9 @@
     MIN_TEXT_FOR_AI: 200,
   };
   const ACCESS_CODE_KEY = "zbc.accessCode"; // code facultatif, saisi une fois dans les réglages
+  // App iPhone publiée (App Store) : clé du relais fournie par l'app, et jamais d'IA
+  const APP = (window.LUC_APP && typeof window.LUC_APP === "object") ? window.LUC_APP : null;
+  const NO_AI = !!(APP && APP.noAI);
   const WORKER_URL_KEY = "zbc.workerUrl"; // adresse du relais saisie dans les réglages (prioritaire)
 
   function readSetting(key) {
@@ -1089,7 +1092,10 @@
     try {
       res = await fetch(workerUrl + path, {
         method: "POST",
-        headers: { "content-type": "application/json", ...(accessCode ? { "x-access-code": accessCode } : {}) },
+        headers: {
+          "content-type": "application/json",
+          ...(APP && APP.key ? { "x-app-key": APP.key } : accessCode ? { "x-access-code": accessCode } : {}),
+        },
         body: JSON.stringify(body),
       });
     } catch {
@@ -1098,7 +1104,7 @@
       }
       throw new ExtractError(
         "RELAY_UNREACHABLE",
-        `Impossible de joindre le relais (${workerUrl}). Vérifiez son adresse dans les Réglages : en l'ouvrant dans Safari, vous devez voir un message « Relais Zéro Blabla Cuisine ».`,
+        `Impossible de joindre le relais (${workerUrl}). Vérifiez son adresse dans les Réglages : en l'ouvrant dans Safari, vous devez voir un message commençant par « Relais ».`,
       );
     }
     let raw = "", readFailed = false;
@@ -1199,6 +1205,14 @@
     }
 
     const hasPartial = !!partial && (partial.ingredients.length > 0 || partial.steps.length > 0);
+    if (NO_AI) { // app App Store : pas d'analyse par l'IA
+      if (hasPartial) {
+        log("Recette partielle conservée (lecture du texte)", "warn");
+        return { recipe: partial, warnings: ["Recette incomplète : cette page n'est pas lisible entièrement sans IA. Vérifiez sur le site d'origine."] };
+      }
+      log("Pas de recette lisible sur cette page", "error");
+      throw new ExtractError("NO_RECIPE", "Cette page ne contient pas de recette lisible automatiquement. Ouvrez-la sur le site d'origine.");
+    }
     const text = getText();
     if (text.length < CONFIG.MIN_TEXT_FOR_AI) {
       if (hasPartial) {
@@ -1892,7 +1906,7 @@
   }
 
   window.ZBC = {
-    CONFIG, ACCESS_CODE_KEY, WORKER_URL_KEY, getWorkerUrl, ExtractError,
+    CONFIG, ACCESS_CODE_KEY, WORKER_URL_KEY, getWorkerUrl, ExtractError, NO_AI, APP,
     extractRecipe, extractFromHtml, parseTargetUrl, searchRecipes, readPhotos, recipeFromText, photosToRecipeAI, analyzeUrl, previewImages, rememberImage, cachedImage, synthesize, refreshChefIndex, chefIndexStatus, chefIndexStale, setChefSourceEnabled, CHEF_CATALOGS, detectChefSource, addChefSource, removeChefSource, chefIndexItems, chefIndexCount, matchesQuery, queryWords, getSearchSites, saveSearchSites, resetSearchSites, rememberRemovedSite, normalizeHost, testSearchSite, DEFAULT_SEARCH_SITES,
     parseIngredient, formatIngredient, formatQuantity, parseDuration, parseServings,
   };

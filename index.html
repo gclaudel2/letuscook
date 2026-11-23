@@ -674,12 +674,12 @@ window.applyTheme = function (name) {
       <div id="chef-index"></div>
       <p>Ces sites n'ont pas de moteur de recherche : l'appli parcourt leurs recettes une fois par semaine et les garde sur cet appareil, pour les retrouver instantanément.</p>
     </div>
-    <div class="group">
+    <div class="group relay-group">
       <label class="field-label" for="set-worker">Adresse du relais</label>
       <input class="input" id="set-worker" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://zbc-relais.….workers.dev">
       <p>Laissez vide pour utiliser le relais prévu par l'appli (affiché en grisé). À remplir seulement pour en utiliser un autre.</p>
     </div>
-    <div class="group">
+    <div class="group relay-group">
       <label class="field-label" for="set-code">Code d'accès</label>
       <input class="input" id="set-code" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Le code ACCESS_CODE du relais">
       <p>Laissez vide si le relais n'exige pas de code, ou si le code est déjà prévu par l'appli.</p>
@@ -706,14 +706,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.22.0"></script>
-<script src="extracteur.js?v=2.22.0"></script>
+<script src="config.js?v=2.23.0"></script>
+<script src="extracteur.js?v=2.23.0"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.22.0";
+const APP_VERSION = "2.23.0";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1130,7 +1130,7 @@ const Sound = {
 /** Voix Gemini : sons mis en cache, étape suivante préparée à l'avance. */
 const Voice = {
   cache: new Map(), pausedUntil: 0, disabled: false,
-  available() { return !this.disabled && Date.now() > this.pausedUntil && !!ZBC.getWorkerUrl(); },
+  available() { return !ZBC.NO_AI && !this.disabled && Date.now() > this.pausedUntil && !!ZBC.getWorkerUrl(); },
   get(text) {
     if (!this.cache.has(text)) {
       const p = ZBC.synthesize(text).then((r) => clipFrom(r.audio, r.mimeType));
@@ -1550,13 +1550,14 @@ function renderExtractPanel() {
   }, label);
   const photo = h("div", { class: "photo-block" },
     h("div", { class: "or" }, h("span", {}, "ou")),
-    h("div", { class: "segs photo-mode", role: "group", "aria-label": "Lecture de la photo" },
+    !ZBC.NO_AI && h("div", { class: "segs photo-mode", role: "group", "aria-label": "Lecture de la photo" },
       modeBtn("iphone", "Sur le smartphone"), modeBtn("ia", "Par l'IA")),
     h("button", { class: "btn photo-btn", type: "button", disabled: state.loading, onclick: () => photoInput.click() },
       icon("camera"), state.loadingPhoto ? "Lecture de la photo…" : "Photo d'une recette"),
     photoInput,
     h("p", { class: "hint" }, mode === "ia"
       ? "Lue par l'IA (Gemini) : le meilleur résultat, même pour un cahier écrit à la main. La photo est envoyée à Google via votre relais ; Internet nécessaire."
+      : ZBC.NO_AI ? "Lue directement sur l'iPhone, sans rien envoyer : idéal pour un texte imprimé, page à plat, photo de face et bien éclairée."
       : "Lue sur le smartphone, sans IA et sans rien envoyer : bien pour un texte imprimé, page à plat, photo de face et bien éclairée."),
     h("p", { class: "hint" }, "Livre, magazine, fiche ou cahier. Plusieurs photos si la recette tient sur 2 pages."));
 
@@ -1564,7 +1565,7 @@ function renderExtractPanel() {
     form,
     photo,
     state.lastError && h("div", { class: "notice error", role: "alert" }, state.lastError),
-    state.lastError && state.lastPhotos && h("button", {
+    state.lastError && state.lastPhotos && !ZBC.NO_AI && h("button", {
       class: "btn retry-photo", type: "button",
       onclick: () => runPhotoExtraction(state.lastPhotos, state.lastPhotoMode === "ia" ? "iphone" : "ia"),
     }, icon("camera"), state.lastPhotoMode === "ia" ? "Réessayer en lisant sur le smartphone" : "Réessayer avec l'IA"),
@@ -1663,7 +1664,7 @@ function photoThumb(file) {
 }
 
 /** Photo(s) d'une recette → lecture du texte sur l'iPhone → recette pas à pas (aperçu, puis carnet). */
-const photoMode = () => (store.get("zbc.photoMode", "iphone") === "ia" ? "ia" : "iphone");
+const photoMode = () => (!ZBC.NO_AI && store.get("zbc.photoMode", "iphone") === "ia" ? "ia" : "iphone");
 
 async function runPhotoExtraction(files, forceMode) {
   if (state.loading) return;
@@ -3262,6 +3263,7 @@ function openSettings() {
   $("#set-worker").value = worker;
   $("#set-worker").placeholder = ZBC.getWorkerUrl() || "https://zbc-relais.….workers.dev";
   $("#set-code").value = code;
+  document.querySelectorAll("#settings .relay-group").forEach((g) => { g.hidden = !!(ZBC.APP && ZBC.APP.key); }); // app App Store : relais intégré
   $("#settings-version").textContent = `Let Us Cook · version ${APP_VERSION}${Native ? " · app iPhone" : ""}`;
   sitesUI.editing = null; sitesUI.test = null;
   renderSitesManager();
