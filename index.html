@@ -212,6 +212,14 @@
   .icon-btn:active { background: var(--line); }
   .icon-btn svg { width: 22px; height: 22px; flex: none; }
   .icon-btn.on { background: var(--accent); color: var(--accent-ink); }
+  .icon-btn.save { padding: 0 16px 0 13px; flex: none; }
+  @media (max-width: 400px) {
+    .topbar .wrap { gap: 2px; }
+    .topbar .icon-btn { min-width: 40px; padding: 0 8px; }
+    #btn-wake .label { display: none; }   /* l'icône soleil suffit sur petit écran */
+    .topbar .icon-btn.save { padding: 0 14px; font-size: 15px; }
+    .topbar .icon-btn.save svg { display: none; }
+  }
   .mini-brand { font: 700 17px/1 var(--serif); letter-spacing: -0.01em; }
 
   /* ── Accueil ───────────────────────────────────── */
@@ -226,6 +234,11 @@
     html .tabs { gap: 2px; }
     html .tabs .tab { padding: 0 5px; font-size: 14.5px; }
     html[data-theme="etoile"] .tabs .tab { font-size: 12px; letter-spacing: 0.06em; }
+  }
+  @media (max-width: 360px) { /* iPhone SE (1re génération), mini avec gros texte… */
+    html .tabs { padding: 4px; }
+    html .tabs .tab { padding: 0 4px; font-size: 13.5px; }
+    html .tabs .tab .count { display: none; }
   }
   .hero-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .hero-row .icon-btn { margin: 0 -10px 0 0; flex: none; }
@@ -370,6 +383,29 @@
   /* ── Recette / mode cuisine ────────────────────── */
   .r-image { margin: 4px 0 18px; border-radius: var(--radius); overflow: hidden; aspect-ratio: 16 / 10; background: var(--accent-soft); }
   .r-image img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  button.r-image { display: block; position: relative; width: 100%; padding: 0; border: 0; cursor: zoom-in; color: inherit; }
+  .zoom-badge {
+    position: absolute; right: 10px; bottom: 10px; display: inline-flex; align-items: center; gap: 6px;
+    height: 34px; padding: 0 10px; border-radius: 999px; font: 650 14px/1 var(--rounded);
+    background: rgba(0,0,0,.55); color: #fff; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  }
+  .zoom-badge svg { width: 18px; height: 18px; }
+  .photo-viewer {
+    position: fixed; inset: 0; width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0;
+    border: 0; background: #000; color: #fff; overflow: hidden;
+  }
+  .photo-viewer::backdrop { background: #000; }
+  .pv-stage { position: absolute; inset: 0; display: grid; place-items: center; touch-action: none; overflow: hidden; }
+  .pv-stage img { max-width: 100%; max-height: 100%; object-fit: contain; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; transform-origin: center; will-change: transform; }
+  .pv-top { position: absolute; top: 0; left: 0; right: 0; display: flex; align-items: center; justify-content: space-between; padding: calc(10px + env(safe-area-inset-top)) 14px 10px 20px; background: linear-gradient(rgba(0,0,0,.55), transparent); pointer-events: none; }
+  .pv-count { font: 650 16px/1 var(--rounded); }
+  .pv-close, .pv-nav { pointer-events: auto; display: grid; place-items: center; width: 46px; height: 46px; border-radius: 50%; border: 0; background: rgba(255,255,255,.16); color: #fff; }
+  .pv-close svg, .pv-nav svg { width: 24px; height: 24px; }
+  .pv-nav { position: absolute; top: 50%; transform: translateY(-50%); }
+  .pv-nav.prev { left: 12px; } .pv-nav.next { right: 12px; }
+  .pv-nav:disabled { opacity: 0; pointer-events: none; }
+  .photo-viewer.zoomed .pv-nav, .photo-viewer.zoomed .pv-hint { opacity: 0; pointer-events: none; }
+  .pv-hint { position: absolute; left: 0; right: 0; bottom: calc(14px + env(safe-area-inset-bottom)); margin: 0; text-align: center; font-size: 14px; color: rgba(255,255,255,.7); transition: opacity .2s; pointer-events: none; }
   .r-title { margin: 6px 0 12px; font: var(--head-w) clamp(30px, 8.5vw, 42px)/1.05 var(--head); letter-spacing: -0.02em; }
   .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
   .chip { padding: 6px 12px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); font-size: 15px; }
@@ -485,7 +521,14 @@
   .mn-row .btn.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
   .mn-text { width: 100%; min-height: 52px; height: auto; padding: 12px 14px; font: inherit; font-size: 17px; line-height: 1.45; resize: none; }
 
-  .r-footer { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 30px; }
+  .r-footer { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; max-width: 520px; margin: 30px auto 0; }
+  .r-footer .btn { width: 100%; min-width: 0; height: 52px; padding: 0 12px; gap: 8px; font-size: 16px; white-space: nowrap; }
+  .r-footer .btn svg { width: 20px; height: 20px; }
+  .r-footer .btn:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  @media (max-width: 400px) {
+    .r-footer .btn { font-size: 15px; padding: 0 8px; }
+    .r-footer .btn svg { display: none; }   /* sur petit écran, le texte seul respire mieux */
+  }
 
   /* ── Recherche ─────────────────────────────────── */
   .hero.compact { padding: 10px 0 14px; }
@@ -577,7 +620,13 @@
   .nav-btn.primary { background: var(--accent); color: var(--accent-ink); }
   .nav-btn:disabled { opacity: 0.35; }
   .bar-center { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 1px; }
-  .bar-center strong { font: 800 17px/1.2 var(--rounded); font-variant-numeric: tabular-nums; }
+  .bar-center strong { font: 800 17px/1.2 var(--rounded); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  @media (max-width: 380px) {
+    .cook-bar { gap: 4px; }
+    .nav-btn { width: 48px; height: 48px; }
+    .hf-btn { width: 36px; height: 36px; }
+    .bar-center strong { font-size: 15px; }
+  }
   .bar-center small { font-size: 12px; color: var(--muted); line-height: 1.2; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .motion-meter { display: block; width: 60%; height: 3px; border-radius: 2px; background: var(--line); overflow: hidden; margin-top: 3px; }
   .motion-meter span { display: block; height: 100%; background: var(--accent); transform-origin: left; transform: scaleX(0); transition: transform 0.07s linear; }
@@ -751,14 +800,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.27.0"></script>
-<script src="extracteur.js?v=2.27.0"></script>
+<script src="config.js?v=2.28.0"></script>
+<script src="extracteur.js?v=2.28.0"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.27.0";
+const APP_VERSION = "2.28.0";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -788,6 +837,9 @@ const ICONS = {
   bookmark: "M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z",
   edit: "M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z",
   plus: "M12 5v14M5 12h14",
+  zoom: "M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.35-4.35M11 8v6M8 11h6",
+  close: "M18 6L6 18M6 6l12 12",
+  move: "M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20",
   check: "M20 6L9 17l-5-5",
   copy: "M20 9h-9a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2zM5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1",
   mail: "M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM22 6l-10 7L2 6",
@@ -1050,6 +1102,11 @@ function serializeForBook(r) {
   const copy = { ...r };
   delete copy.book;
   if (typeof copy.image === "string" && copy.image.startsWith("data:") && copy.image.length > 600000) delete copy.image;
+  // photos d'origine : autant que la taille maximale d'une recette partagée le permet
+  if (Array.isArray(copy.photos)) {
+    while (copy.photos.length && JSON.stringify(copy).length > 850000) copy.photos = copy.photos.slice(0, -1);
+    if (!copy.photos.length) delete copy.photos;
+  }
   return JSON.stringify(copy);
 }
 function refreshAfterSync() {
@@ -2053,6 +2110,25 @@ function photoThumb(file) {
   });
 }
 
+/** Photo d'origine en bonne définition (pour la zoomer dans le carnet). */
+function photoFull(file) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.naturalWidth * scale); c.height = Math.round(img.naturalHeight * scale);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      try { resolve(c.toDataURL("image/jpeg", 0.8)); } catch { resolve(undefined); }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(undefined); };
+    img.src = url;
+  });
+}
+const photosOf = async (files) => (await Promise.all([...files].slice(0, 4).map(photoFull))).filter(Boolean);
+
 /** Photo(s) d'une recette → lecture du texte sur l'iPhone → recette pas à pas (aperçu, puis carnet). */
 const photoMode = () => (!ZBC.NO_AI && store.get("zbc.photoMode", "iphone") === "ia" ? "ia" : "iphone");
 
@@ -2069,6 +2145,7 @@ async function runPhotoExtraction(files, forceMode) {
     try {
       const recipe = await ZBC.photosToRecipeAI(files, pushLog);
       recipe.image = await photoThumb(files[0]);
+    recipe.photos = await photosOf(files);
       const warnings = ["Lue par l'IA sur la photo : vérifiez les quantités avant de cuisiner."];
       if (!recipe.ingredients.length) warnings.unshift("Aucun ingrédient reconnu.");
       if (!recipe.steps.length) warnings.unshift("Aucune étape reconnue.");
@@ -2093,6 +2170,7 @@ async function runPhotoExtraction(files, forceMode) {
         : "Le texte a été lu, mais je n'y reconnais pas de recette (ingrédients avec quantités, étapes).");
     }
     recipe.image = await photoThumb(files[0]);
+    recipe.photos = await photosOf(files);
     pushLog(`Recette découpée : ${recipe.ingredients.length} ingrédient${recipe.ingredients.length > 1 ? "s" : ""}, ${recipe.steps.length} étape${recipe.steps.length > 1 ? "s" : ""}`, recipe.ingredients.length && recipe.steps.length ? "ok" : "warn");
     const warnings = ["Lue automatiquement sur la photo : vérifiez les quantités avant de cuisiner."];
     if (!recipe.ingredients.length) warnings.unshift("Aucun ingrédient reconnu.");
@@ -2527,7 +2605,7 @@ function rememberView(recipe, saved) {
   // Toujours une copie de la recette (même enregistrée : elle reste ouvrable si on la supprime du carnet),
   // sans la photo prise avec le téléphone, trop lourde pour la mémoire du navigateur
   let copy = { ...recipe };
-  delete copy.my;
+  delete copy.my; delete copy.photos;
   if (typeof copy.image === "string" && copy.image.startsWith("data:") && copy.image.length > 80000) delete copy.image;
   if (JSON.stringify(copy).length > 200000) copy = undefined;
   const entry = {
@@ -3000,6 +3078,100 @@ function askFreeTimer(recipe) {
   Timers.start({ ms, name: "Minuteur", recipeId: recipe?.id, recipeTitle: recipe?.title });
 }
 
+/* ════════════ Photo en grand : pincer pour zoomer, glisser, double-toucher ════════════ */
+function openPhotoViewer(srcs, start = 0) {
+  let index = start, scale = 1, tx = 0, ty = 0;
+  const pointers = new Map();
+  let pinch = null, pan = null, lastTap = 0, swipe = null;
+  const img = h("img", { alt: "", draggable: "false", referrerpolicy: "no-referrer" });
+  const stage = h("div", { class: "pv-stage" }, img);
+  const counter = h("span", { class: "pv-count" });
+  const prevBtn = h("button", { type: "button", class: "pv-nav prev", "aria-label": "Photo précédente", onclick: () => show(index - 1) }, icon("prev"));
+  const nextBtn = h("button", { type: "button", class: "pv-nav next", "aria-label": "Photo suivante", onclick: () => show(index + 1) }, icon("next"));
+  const dlg = h("dialog", { class: "photo-viewer", "aria-label": "Photo de la recette" },
+    stage,
+    h("div", { class: "pv-top" }, counter, h("button", { type: "button", class: "pv-close", "aria-label": "Fermer", onclick: () => dlg.close() }, icon("close"))),
+    srcs.length > 1 && prevBtn, srcs.length > 1 && nextBtn,
+    h("p", { class: "pv-hint" }, "Pincez pour zoomer · double-touchez"));
+  const limits = () => {
+    const r = stage.getBoundingClientRect(), w = img.clientWidth * scale, hgt = img.clientHeight * scale;
+    const mx = Math.max(0, (w - r.width) / 2), my = Math.max(0, (hgt - r.height) / 2);
+    tx = Math.min(mx, Math.max(-mx, tx)); ty = Math.min(my, Math.max(-my, ty));
+  };
+  const apply = (anim) => {
+    img.style.transition = anim ? "transform .22s ease" : "none";
+    img.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+    dlg.classList.toggle("zoomed", scale > 1.01);
+  };
+  const zoomAt = (newScale, cx, cy, anim) => {
+    const r = stage.getBoundingClientRect();
+    const ox = cx - (r.left + r.width / 2), oy = cy - (r.top + r.height / 2);
+    newScale = Math.min(6, Math.max(1, newScale));
+    tx = ox - (ox - tx) * (newScale / scale); ty = oy - (oy - ty) * (newScale / scale);
+    scale = newScale;
+    if (scale === 1) { tx = 0; ty = 0; }
+    limits(); apply(anim);
+  };
+  function show(i) {
+    if (i < 0 || i >= srcs.length) return;
+    index = i; scale = 1; tx = 0; ty = 0; apply(false);
+    img.src = srcs[i];
+    counter.textContent = srcs.length > 1 ? `${i + 1} / ${srcs.length}` : "";
+    prevBtn.disabled = i === 0; nextBtn.disabled = i === srcs.length - 1;
+  }
+  stage.addEventListener("pointerdown", (e) => {
+    stage.setPointerCapture(e.pointerId);
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.size === 2) {
+      const [a, b] = [...pointers.values()];
+      pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), s: scale }; pan = null; swipe = null;
+    } else if (pointers.size === 1) {
+      pan = { x: e.clientX, y: e.clientY, tx, ty }; swipe = scale <= 1.01 ? { x: e.clientX, y: e.clientY } : null;
+    }
+  });
+  stage.addEventListener("pointermove", (e) => {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinch && pointers.size >= 2) {
+      const [a, b] = [...pointers.values()];
+      zoomAt(pinch.s * Math.hypot(a.x - b.x, a.y - b.y) / pinch.d, (a.x + b.x) / 2, (a.y + b.y) / 2, false);
+    } else if (pan && scale > 1.01) {
+      tx = pan.tx + e.clientX - pan.x; ty = pan.ty + e.clientY - pan.y; limits(); apply(false);
+    }
+  });
+  const end = (e) => {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.delete(e.pointerId);
+    if (pointers.size < 2) pinch = null;
+    if (pointers.size === 0) {
+      const moved = pan ? Math.hypot(e.clientX - pan.x, e.clientY - pan.y) : 99;
+      if (swipe) {
+        const dx = e.clientX - swipe.x, dy = e.clientY - swipe.y;
+        if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) show(index + (dx < 0 ? 1 : -1));
+        else if (dy > 110 && Math.abs(dy) > Math.abs(dx)) dlg.close();   // glisser vers le bas : fermer
+      }
+      if (moved < 10) { // toucher : double-toucher = zoom / dézoom
+        const now = Date.now();
+        if (now - lastTap < 320) { zoomAt(scale > 1.01 ? 1 : 2.5, e.clientX, e.clientY, true); lastTap = 0; }
+        else lastTap = now;
+      }
+      pan = null; swipe = null;
+    } else if (pointers.size === 1) {
+      const [p] = [...pointers.values()]; pan = { x: p.x, y: p.y, tx, ty };
+    }
+  };
+  stage.addEventListener("pointerup", end);
+  stage.addEventListener("pointercancel", end);
+  stage.addEventListener("wheel", (e) => { e.preventDefault(); zoomAt(scale * (e.deltaY < 0 ? 1.15 : 1 / 1.15), e.clientX, e.clientY, false); }, { passive: false });
+  // Safari iOS : on bloque le zoom de toute la page pendant le pincement
+  ["gesturestart", "gesturechange"].forEach((t) => dlg.addEventListener(t, (e) => e.preventDefault()));
+  dlg.addEventListener("keydown", (e) => { if (e.key === "ArrowRight") show(index + 1); if (e.key === "ArrowLeft") show(index - 1); });
+  dlg.addEventListener("close", () => dlg.remove());
+  document.body.append(dlg);
+  show(start);
+  dlg.showModal();
+}
+
 /* ════════════ Mes notes (recettes du carnet) ════════════ */
 const longDate = (iso) => new Date(iso).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
 const todayKey = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
@@ -3170,12 +3342,12 @@ function renderRecipe(recipe, { saved }) {
   const toolbar = [
     h("button", { class: "icon-btn", "aria-label": "Retour", onclick: () => go(saved ? "#/carnet" : state.returnTo || "#/") }, icon("back")),
     h("span", { class: "spacer" }),
-    Wake.supported && h("button", { class: "icon-btn", id: "btn-wake", "aria-pressed": "false", onclick: () => (Wake.wanted ? Wake.disable() : Wake.enable()) },
+    Wake.supported && h("button", { class: "icon-btn", id: "btn-wake", "aria-label": "Garder l'écran allumé", "aria-pressed": "false", onclick: () => (Wake.wanted ? Wake.disable() : Wake.enable()) },
       icon("sun"), h("span", { class: "label" }, "Écran")),
     h("button", { class: "icon-btn", "aria-label": "Nouveau minuteur", title: "Minuteur", onclick: () => askFreeTimer(recipe) }, icon("clock")),
     h("button", { class: "icon-btn", "aria-label": "Partager la recette", onclick: () => openShare(recipe) }, icon("share")),
     !saved && h("button", {
-      class: "icon-btn on", onclick: async (e) => {
+      class: "icon-btn on save", onclick: async (e) => {
         const btn = e.currentTarget;
         const bookId = await chooseBook("Enregistrer dans…");
         if (!bookId) return;
@@ -3196,10 +3368,12 @@ function renderRecipe(recipe, { saved }) {
   const header = [];
   const img = safeImageUrl(recipe.image);
   if (img) {
-    const figure = h("div", { class: "r-image" });
+    const photos = Array.isArray(recipe.photos) && recipe.photos.length ? recipe.photos : [img];
+    const figure = h("button", { type: "button", class: "r-image", "aria-label": photos.length > 1 ? `Agrandir les ${photos.length} photos` : "Agrandir la photo",
+      onclick: () => openPhotoViewer(photos) });
     const el = h("img", { src: img, alt: "", referrerpolicy: "no-referrer" });
     el.addEventListener("error", () => figure.remove());
-    figure.append(el);
+    figure.append(el, h("span", { class: "zoom-badge", "aria-hidden": "true" }, icon("zoom"), photos.length > 1 ? `${photos.length} photos` : null));
     header.push(figure);
   }
   if (recipe.chef) header.push(h("p", { class: "r-chef" }, `Recette du chef ${recipe.chef}`));
@@ -3404,24 +3578,24 @@ function renderRecipe(recipe, { saved }) {
       servings = base || 1;
       updateServings();
       window.scrollTo({ top: 0, behavior: "smooth" });
-    } }, "Tout recommencer"),
+    } }, icon("refresh"), "Recommencer"),
     saved && Books.list().length > 1 && h("button", { class: "btn", onclick: async () => {
       const to = await chooseBook(`Déplacer vers… (aujourd'hui : ${Books.get(bookOf(recipe))?.name || "Mon carnet"})`, bookOf(recipe));
       if (!to) return;
       await moveRecipe(recipe, to);
       toast(`Déplacée dans « ${Books.get(to)?.name} »`);
-    } }, "Déplacer"),
+    } }, icon("move"), "Déplacer"),
     saved && Books.list().length > 1 && h("button", { class: "btn", onclick: async () => {
       const to = await chooseBook("Copier dans…", bookOf(recipe));
       if (!to) return;
       if (await copyRecipe(recipe, to)) toast(`Copiée dans « ${Books.get(to)?.name} »`);
-    } }, "Copier vers…"),
+    } }, icon("copy"), "Copier vers…"),
     saved && h("button", { class: "btn danger", onclick: async () => {
       if (!confirm(`Supprimer « ${recipe.title} » du carnet ?`)) return;
       await deleteRecipe(recipe.id);
       toast("Recette supprimée");
       go("#/carnet", true);
-    } }, "Supprimer"),
+    } }, icon("trash"), "Supprimer"),
   );
 
   // Deux colonnes sur tablette en paysage (ingrédients fixes à gauche, étapes à droite), une seule sur téléphone
