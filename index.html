@@ -738,14 +738,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.25.0"></script>
-<script src="extracteur.js?v=2.25.0"></script>
+<script src="config.js?v=2.26.0"></script>
+<script src="extracteur.js?v=2.26.0"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.25.0";
+const APP_VERSION = "2.26.0";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1055,6 +1055,15 @@ async function touchRecipe(recipe) {
   Sync.mark(bookOf(recipe), recipe.id, "put");
 }
 
+/** Copie d'une recette dans un autre carnet (avec ses notes) ; l'original ne bouge pas. */
+async function copyRecipe(recipe, toBook, { ask = true } = {}) {
+  const twin = state.recipes.find((r) => bookOf(r) === toBook && (recipe.sourceUrl ? r.sourceUrl === recipe.sourceUrl : r.title === recipe.title));
+  if (twin && (!ask || !confirm(`« ${recipe.title} » est déjà dans « ${Books.get(toBook)?.name} ». La copier quand même ?`))) return null;
+  const copy = JSON.parse(JSON.stringify(recipe));
+  delete copy.id;
+  return saveRecipe(copy, toBook);
+}
+
 async function moveRecipe(recipe, toBook) {
   const from = bookOf(recipe);
   if (from === toBook) return;
@@ -1082,7 +1091,12 @@ function chooseBook(title, exclude) {
 }
 
 /* ── Créer, rejoindre, gérer ── */
-function inviteLink(book, invite) { return `${APP_URL()}#/rejoindre/${book.id}.${invite}`; }
+/** Lien d'invitation : il passe par le relais, qui ouvre l'app Let Us Cook si elle est installée (lien universel),
+ *  sinon renvoie vers la version web. Sans relais (cas rare), lien direct vers la version web. */
+function inviteLink(book, invite) {
+  const relay = ZBC.getWorkerUrl();
+  return relay ? `${relay}/rejoindre/${book.id}.${invite}?app=${encodeURIComponent(APP_URL())}` : `${APP_URL()}#/rejoindre/${book.id}.${invite}`;
+}
 
 function openNewBook() {
   const nameInput = h("input", { class: "input", type: "text", placeholder: "Ex. Famille, Desserts, Recettes de Mamie", maxlength: "40" });
@@ -1111,7 +1125,7 @@ function openNewBook() {
     } }, "Créer le carnet"),
     h("div", { class: "group" }, h("label", { class: "field-label" }, "Ou rejoindre un carnet partagé"), joinInput,
       h("button", { type: "button", class: "btn", style: "width:100%;margin-top:8px", onclick: () => {
-        const m = /#\/rejoindre\/([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)/.exec(joinInput.value);
+        const m = /\/rejoindre\/([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)/.exec(joinInput.value);
         if (!m) { toast("Lien d'invitation non reconnu."); return; }
         close(); joinBook(m[1], m[2]);
       } }, "Rejoindre")),
@@ -1145,7 +1159,7 @@ async function openInvite(book) {
   if (!invite) { toast("Lien indisponible : vérifiez la connexion."); return; }
   Books.update(book.id, { invite });
   const link = inviteLink(book, invite);
-  const text = `Je t'invite dans mon carnet de recettes « ${book.name} » sur Let Us Cook.\nOuvre Let Us Cook › Carnet › + › « Rejoindre », et colle ce lien :\n${link}`;
+  const text = `Je t'invite dans mon carnet de recettes « ${book.name} » sur Let Us Cook.\nTouche ce lien pour l'ajouter dans ton appli :\n${link}`;
   const enc = encodeURIComponent;
   const close = () => dlg.close();
   const opt = (iconName, label, onclick, href) => href
@@ -1190,6 +1204,15 @@ function openManageBook(book) {
           try { const r = await call("lien", { reset: true }); Books.update(book.id, { invite: r.invite }); close(); openInvite(Books.get(book.id)); } catch (err) { toast(err.message); }
         } }, icon("copy"), "Nouveau lien d'invitation"))) : h("p", { class: "site-help" }, "Carnet privé : il reste sur cet appareil."),
     h("div", { class: "share-opts", style: "margin-top:14px" },
+      Books.list().length > 1 && Books.count(book.id) > 0 && h("button", { type: "button", class: "btn share-opt", onclick: async () => {
+        close();
+        const to = await chooseBook(`Copier les ${Books.count(book.id)} recettes de « ${book.name} » dans…`, book.id);
+        if (!to) return;
+        let n = 0;
+        for (const r of state.recipes.filter((x) => bookOf(x) === book.id).reverse()) if (await copyRecipe(r, to, { ask: false })) n++;
+        toast(n ? `${n} recette${n > 1 ? "s" : ""} copiée${n > 1 ? "s" : ""} dans « ${Books.get(to)?.name} »` : "Elles y sont déjà toutes.");
+        renderHome();
+      } }, icon("copy"), "Copier toutes les recettes vers…"),
       h("button", { type: "button", class: "btn share-opt", onclick: async () => {
         const name = (prompt("Nouveau nom du carnet", book.name) || "").trim();
         if (!name || name === book.name) return;
@@ -1969,7 +1992,7 @@ async function runExtraction(raw) {
   state.lastUrl = raw;
   state.lastError = "";
 
-  const invite = /#\/rejoindre\/([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)/.exec(String(raw || ""));
+  const invite = /\/rejoindre\/([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)/.exec(String(raw || ""));
   if (invite) return joinBook(invite[1], invite[2]); // lien d'invitation dans un carnet partagé
   const shared = /#\/partage\/([A-Za-z0-9_-]+)/.exec(String(raw || ""));
   if (shared) return openSharedLink(shared[1]); // lien de partage letuscook collé dans l'onglet Lien
@@ -3374,6 +3397,11 @@ function renderRecipe(recipe, { saved }) {
       await moveRecipe(recipe, to);
       toast(`Déplacée dans « ${Books.get(to)?.name} »`);
     } }, "Déplacer"),
+    saved && Books.list().length > 1 && h("button", { class: "btn", onclick: async () => {
+      const to = await chooseBook("Copier dans…", bookOf(recipe));
+      if (!to) return;
+      if (await copyRecipe(recipe, to)) toast(`Copiée dans « ${Books.get(to)?.name} »`);
+    } }, "Copier vers…"),
     saved && h("button", { class: "btn danger", onclick: async () => {
       if (!confirm(`Supprimer « ${recipe.title} » du carnet ?`)) return;
       await deleteRecipe(recipe.id);

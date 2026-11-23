@@ -949,6 +949,32 @@ async function handleCarnet(action, body, env) {
   throw new RelayError("NOT_FOUND", "Action de carnet inconnue.", 404);
 }
 
+// ── Liens d'invitation : ouvrent l'app iPhone (lien universel), sinon la version web ──
+// Apple lit ce fichier pour savoir que les liens /rejoindre/… de ce relais appartiennent à l'app Let Us Cook.
+const IOS_APP_IDS = ["M2838V3J42.com.letusgeek.letuscook"];
+const WEB_APP_URL = "https://gclaudel2.github.io/letuscook/";
+function appleAssociation() {
+  return new Response(JSON.stringify({
+    applinks: { details: [{ appIDs: IOS_APP_IDS, components: [{ "/": "/rejoindre/*", comment: "Invitation dans un carnet partagé" }] }] },
+  }), { headers: { "content-type": "application/json", "cache-control": "max-age=3600" } });
+}
+/** Lien ouvert hors de l'app (app pas installée, ordinateur…) : on bascule vers la version web, qui rejoint le carnet. */
+function invitePage(request) {
+  const url = new URL(request.url);
+  const code = url.pathname.slice("/rejoindre/".length);
+  if (!/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(code)) return new Response("Lien d'invitation incomplet.", { status: 404 });
+  let app = WEB_APP_URL;
+  const asked = url.searchParams.get("app") || "";
+  if (/^(?:https:\/\/[a-z0-9.-]+|http:\/\/localhost)(?::\d+)?\/[^\s"'<>#]*$/i.test(asked)) app = asked;
+  const target = `${app}#/rejoindre/${code}`;
+  const esc = (t) => t.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+  return new Response(`<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Invitation · Let Us Cook</title><meta http-equiv="refresh" content="0;url=${esc(target)}">
+<style>body{font:17px/1.5 -apple-system,system-ui,sans-serif;background:#1f2a26;color:#f3efe4;display:grid;place-items:center;min-height:100vh;margin:0;padding:24px;text-align:center}a{color:#e8b84a}</style></head>
+<body><div><h1>Let Us Cook</h1><p>Ouverture du carnet partagé…</p><p><a href="${esc(target)}">Continuer</a></p></div>
+<script>location.replace(${JSON.stringify(target)})</script></body></html>`, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+}
+
 // ── Point d'entrée ───────────────────────────────────────────────
 export default {
   async fetch(request, env, ctx) {
@@ -957,6 +983,10 @@ export default {
 
     const { pathname } = new URL(request.url);
     try {
+      if (request.method === "GET" || request.method === "HEAD") {
+        if (pathname === "/.well-known/apple-app-site-association" || pathname === "/apple-app-site-association") return appleAssociation();
+        if (pathname.startsWith("/rejoindre/")) return invitePage(request);
+      }
       if (request.method !== "POST") throw new RelayError("NOT_FOUND", "Relais Let Us Cook : utilisez POST /page, /ia, /voix, /liens, /apercus ou /photo.", 404);
       const origin = request.headers.get("origin") || "";
       if (!isAllowedOrigin(origin, env)) {
