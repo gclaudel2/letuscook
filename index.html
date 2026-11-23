@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Let Us Cook</title>
 <meta name="description" content="La recette. Rien que la recette : sans pub ni blabla, en mode cuisine.">
 <link rel="manifest" href="manifest.webmanifest">
@@ -395,6 +395,7 @@
     border: 0; background: #000; color: #fff; overflow: hidden;
   }
   .photo-viewer::backdrop { background: #000; }
+  html, body { touch-action: pan-x pan-y; -webkit-text-size-adjust: 100%; } /* comme une app : pas de zoom de la page */
   .pv-stage { position: absolute; inset: 0; display: grid; place-items: center; touch-action: none; overflow: hidden; }
   .pv-stage img { max-width: 100%; max-height: 100%; object-fit: contain; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; transform-origin: center; will-change: transform; }
   .pv-top { position: absolute; top: 0; left: 0; right: 0; display: flex; align-items: center; justify-content: space-between; padding: calc(10px + env(safe-area-inset-top)) 14px 10px 20px; background: linear-gradient(rgba(0,0,0,.55), transparent); pointer-events: none; }
@@ -897,14 +898,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.31.0"></script>
-<script src="extracteur.js?v=2.31.0"></script>
+<script src="config.js?v=2.31.1"></script>
+<script src="extracteur.js?v=2.31.1"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.31.0";
+const APP_VERSION = "2.31.1";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -3214,6 +3215,15 @@ function askFreeTimer(recipe) {
   if (!ms) { toast("Durée non comprise : essayez « 10 » ou « 1h30 »."); return; }
   Timers.start({ ms, name: "Minuteur", recipeId: recipe?.id, recipeTitle: recipe?.title });
 }
+
+/* ════════════ Pas de zoom de la page (pincer ou double-toucher), comme une app iPhone ════════════ */
+// Safari ignore parfois user-scalable=no : on bloque aussi les gestes de zoom (la photo en grand garde le sien).
+["gesturestart", "gesturechange", "gestureend"].forEach((t) => document.addEventListener(t, (e) => {
+  if (!e.target.closest?.(".pv-stage")) e.preventDefault();
+}, { passive: false }));
+document.addEventListener("touchmove", (e) => {
+  if (e.touches.length > 1 && !e.target.closest?.(".pv-stage")) e.preventDefault();
+}, { passive: false });
 
 /* ════════════ Fenêtres : la page derrière ne défile pas ════════════ */
 // Sur iPhone, overflow:hidden ne suffit pas : on fige la page (position fixe) le temps qu'une fenêtre est ouverte.
