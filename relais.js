@@ -10,10 +10,12 @@
  *   POST /liens { url, motif }        → { ok, links: [{u,t,i}] }    (liens de recettes d'une page de liste)
  *   POST /apercus { urls: [...] }     → { ok, images: {url: photo} } (photos des recettes, pour les vignettes)
  *   POST /photo { images: [base64] }  → { ok, recipe, provider }    (recette lue sur des photos par l'IA)
+ *   POST /carnet/creer|rejoindre|sync|lien|renommer|retirer|quitter|supprimer  (carnets partagés, base D1)
  *
  * Variables (Settings → Variables and Secrets) :
  *   ALLOWED_ORIGINS    ex. "https://votre-compte.github.io"  (plusieurs : séparées par des virgules)
  *   ACCESS_CODE        facultatif mais conseillé : code à saisir une fois dans l'appli   [Secret]
+ *   CARNETS            (Bindings › D1 database) base D1 pour les carnets partagés ; tables créées automatiquement
  *   APP_KEY            clé de l'app iPhone « Let Us Cook » (App Store) : remplace le code d'accès  [Secret]
  *                      Avec cette clé, l'IA (/ia, /photo, /voix) n'utilise JAMAIS les clés du relais : seulement la clé
  *                      Gemini personnelle de l'utilisateur (en-tête x-user-ai-key), utilisée pour sa demande puis oubliée.
@@ -800,6 +802,153 @@ async function handleApercus(body) {
   return { ok: true, images };
 }
 
+// ── Carnets partagés (base D1 « CARNETS ») ──────────────────────────
+/*
+ * Un carnet partagé = un identifiant secret + des membres. Pas de compte : chaque membre reçoit un jeton
+ * (gardé sur son téléphone ; on ne stocke que son empreinte SHA-256). On rejoint un carnet avec le lien
+ * d'invitation. Synchronisation : chaque recette a une date de modification, la plus récente gagne ;
+ * le serveur numérote les changements (rev) pour que chacun ne récupère que les nouveautés.
+ */
+const CARNET_MAX_ITEM = 900_000;   // octets par recette (photo intégrée comprise)
+const CARNET_MAX_BATCH = 40;
+let carnetSchema = null;
+
+function carnetDb(env) {
+  if (!env.CARNETS) throw new RelayError("NO_DB", "Carnets partagés pas encore activés sur le relais (base D1 « CARNETS » à relier au Worker).", 501);
+  carnetSchema ??= env.CARNETS.batch([
+    env.CARNETS.prepare("CREATE TABLE IF NOT EXISTS books (id TEXT PRIMARY KEY, name TEXT NOT NULL, invite TEXT NOT NULL, rev INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL)"),
+    env.CARNETS.prepare("CREATE TABLE IF NOT EXISTS members (book_id TEXT NOT NULL, member_id TEXT NOT NULL, token_hash TEXT NOT NULL, name TEXT NOT NULL, owner INTEGER NOT NULL DEFAULT 0, joined_at INTEGER NOT NULL, PRIMARY KEY (book_id, member_id))"),
+    env.CARNETS.prepare("CREATE TABLE IF NOT EXISTS items (book_id TEXT NOT NULL, id TEXT NOT NULL, data TEXT, updated_at INTEGER NOT NULL, rev INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, by_name TEXT, PRIMARY KEY (book_id, id))"),
+    env.CARNETS.prepare("CREATE INDEX IF NOT EXISTS items_rev ON items (book_id, rev)"),
+  ]).catch((err) => { carnetSchema = null; throw err; });
+  return carnetSchema.then(() => env.CARNETS);
+}
+
+const randomId = (bytes = 16) => btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(bytes)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const hex = (buf) => [...buf].map((b) => b.toString(16).padStart(2, "0")).join("");
+const tokenHash = async (t) => hex(await sha256(String(t || "")));
+const cleanName = (s, max = 40) => String(s || "").replace(/[\u0000-\u001f]/g, "").trim().slice(0, max);
+const isId = (s) => typeof s === "string" && /^[A-Za-z0-9_-]{8,64}$/.test(s);
+
+async function carnetMember(db, body) {
+  if (!body || !isId(body.bookId) || typeof body.token !== "string") throw new RelayError("BAD_REQUEST", "Demande incomplète.", 400);
+  const m = await db.prepare("SELECT member_id, name, owner FROM members WHERE book_id = ? AND token_hash = ?")
+    .bind(body.bookId, await tokenHash(body.token)).first();
+  if (!m) throw new RelayError("NOT_MEMBER", "Vous ne faites plus partie de ce carnet (ou il a été supprimé).", 403);
+  return m;
+}
+
+async function carnetInfo(db, bookId) {
+  const book = await db.prepare("SELECT id, name, rev FROM books WHERE id = ?").bind(bookId).first();
+  const { results } = await db.prepare("SELECT member_id AS id, name, owner FROM members WHERE book_id = ? ORDER BY joined_at").bind(bookId).all();
+  return { book, members: results.map((m) => ({ id: m.id, name: m.name, owner: !!m.owner })) };
+}
+
+async function handleCarnet(action, body, env) {
+  const db = await carnetDb(env);
+  const now = Date.now();
+
+  if (action === "creer") {
+    const name = cleanName(body?.name) || "Carnet partagé";
+    const member = cleanName(body?.member, 30) || "Moi";
+    const bookId = randomId(), invite = randomId(12), memberId = randomId(9), token = randomId(24);
+    await db.batch([
+      db.prepare("INSERT INTO books (id, name, invite, rev, created_at) VALUES (?, ?, ?, 0, ?)").bind(bookId, name, invite, now),
+      db.prepare("INSERT INTO members (book_id, member_id, token_hash, name, owner, joined_at) VALUES (?, ?, ?, ?, 1, ?)").bind(bookId, memberId, await tokenHash(token), member, now),
+    ]);
+    return { ok: true, book: { id: bookId, name }, memberId, token, invite, owner: true };
+  }
+
+  if (action === "rejoindre") {
+    if (!body || !isId(body.bookId) || typeof body.invite !== "string") throw new RelayError("BAD_REQUEST", "Lien d'invitation incomplet.", 400);
+    const book = await db.prepare("SELECT id, name, invite FROM books WHERE id = ?").bind(body.bookId).first();
+    if (!book || !(await sameSecret(body.invite, book.invite))) throw new RelayError("BAD_INVITE", "Ce lien d'invitation n'est plus valable : demandez-en un nouveau.", 403);
+    const count = await db.prepare("SELECT COUNT(*) AS n FROM members WHERE book_id = ?").bind(book.id).first();
+    if ((count?.n || 0) >= 30) throw new RelayError("FULL", "Ce carnet a déjà 30 membres.", 403);
+    const memberId = randomId(9), token = randomId(24);
+    await db.prepare("INSERT INTO members (book_id, member_id, token_hash, name, owner, joined_at) VALUES (?, ?, ?, ?, 0, ?)")
+      .bind(book.id, memberId, await tokenHash(token), cleanName(body.member, 30) || "Invité", now).run();
+    return { ok: true, book: { id: book.id, name: book.name }, memberId, token, owner: false };
+  }
+
+  const me = await carnetMember(db, body);
+
+  if (action === "sync") {
+    const changes = Array.isArray(body.changes) ? body.changes.slice(0, CARNET_MAX_BATCH) : [];
+    for (const c of changes) {
+      if (!c || !isId(c.id) || !Number.isFinite(c.updatedAt)) continue;
+      const deleted = c.deleted ? 1 : 0;
+      const data = deleted ? null : typeof c.data === "string" ? c.data : null;
+      if (!deleted && (!data || data.length > CARNET_MAX_ITEM)) continue;
+      const { rev } = await db.prepare("UPDATE books SET rev = rev + 1 WHERE id = ? RETURNING rev").bind(body.bookId).first();
+      // la modification la plus récente gagne (égalité : la dernière arrivée)
+      await db.prepare(
+        "INSERT INTO items (book_id, id, data, updated_at, rev, deleted, by_name) VALUES (?, ?, ?, ?, ?, ?, ?) " +
+        "ON CONFLICT (book_id, id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at, rev = excluded.rev, " +
+        "deleted = excluded.deleted, by_name = excluded.by_name WHERE excluded.updated_at >= items.updated_at",
+      ).bind(body.bookId, c.id, data, Math.round(c.updatedAt), rev, deleted, me.name).run();
+    }
+    const since = Number.isFinite(body.since) ? body.since : 0;
+    const { results } = await db.prepare("SELECT id, data, updated_at, deleted, by_name, rev FROM items WHERE book_id = ? AND rev > ? ORDER BY rev LIMIT 60")
+      .bind(body.bookId, since).all();
+    const info = await carnetInfo(db, body.bookId);
+    const last = results.length ? results[results.length - 1].rev : since;
+    return {
+      ok: true, name: info.book.name, rev: results.length === 60 ? last : Math.max(last, info.book.rev), more: results.length === 60,
+      members: info.members, me: me.member_id, owner: !!me.owner,
+      changes: results.map((r) => ({ id: r.id, data: r.data, updatedAt: r.updated_at, deleted: !!r.deleted, by: r.by_name })),
+    };
+  }
+
+  if (action === "lien") { // lien d'invitation actuel ; le créateur peut en faire un nouveau (l'ancien ne marche plus)
+    if (body.reset) {
+      if (!me.owner) throw new RelayError("NOT_OWNER", "Seul le créateur du carnet peut changer le lien.", 403);
+      const invite = randomId(12);
+      await db.prepare("UPDATE books SET invite = ? WHERE id = ?").bind(invite, body.bookId).run();
+      return { ok: true, invite };
+    }
+    const book = await db.prepare("SELECT invite FROM books WHERE id = ?").bind(body.bookId).first();
+    return { ok: true, invite: book.invite };
+  }
+
+  if (action === "renommer") {
+    const name = cleanName(body.name);
+    if (!name) throw new RelayError("BAD_REQUEST", "Nom vide.", 400);
+    const { rev } = await db.prepare("UPDATE books SET name = ?, rev = rev + 1 WHERE id = ? RETURNING rev").bind(name, body.bookId).first();
+    return { ok: true, name, rev };
+  }
+
+  if (action === "retirer") {
+    if (!me.owner) throw new RelayError("NOT_OWNER", "Seul le créateur du carnet peut retirer un membre.", 403);
+    if (!isId(body.memberId) || body.memberId === me.member_id) throw new RelayError("BAD_REQUEST", "Membre inconnu.", 400);
+    await db.prepare("DELETE FROM members WHERE book_id = ? AND member_id = ?").bind(body.bookId, body.memberId).run();
+    return { ok: true, ...(await carnetInfo(db, body.bookId)) };
+  }
+
+  if (action === "quitter") {
+    await db.prepare("DELETE FROM members WHERE book_id = ? AND member_id = ?").bind(body.bookId, me.member_id).run();
+    const left = await db.prepare("SELECT member_id FROM members WHERE book_id = ? ORDER BY joined_at LIMIT 1").bind(body.bookId).first();
+    if (!left) { // plus personne : le carnet est effacé du serveur
+      await db.batch([db.prepare("DELETE FROM items WHERE book_id = ?").bind(body.bookId), db.prepare("DELETE FROM books WHERE id = ?").bind(body.bookId)]);
+    } else if (me.owner) { // le plus ancien membre devient responsable
+      await db.prepare("UPDATE members SET owner = 1 WHERE book_id = ? AND member_id = ?").bind(body.bookId, left.member_id).run();
+    }
+    return { ok: true };
+  }
+
+  if (action === "supprimer") {
+    if (!me.owner) throw new RelayError("NOT_OWNER", "Seul le créateur du carnet peut le supprimer.", 403);
+    await db.batch([
+      db.prepare("DELETE FROM items WHERE book_id = ?").bind(body.bookId),
+      db.prepare("DELETE FROM members WHERE book_id = ?").bind(body.bookId),
+      db.prepare("DELETE FROM books WHERE id = ?").bind(body.bookId),
+    ]);
+    return { ok: true };
+  }
+
+  throw new RelayError("NOT_FOUND", "Action de carnet inconnue.", 404);
+}
+
 // ── Point d'entrée ───────────────────────────────────────────────
 export default {
   async fetch(request, env, ctx) {
@@ -824,6 +973,7 @@ export default {
       else if (pathname === "/cle") throw new RelayError("NOT_FOUND", "Route réservée à l'app.", 404);
       const body = await request.json().catch(() => null);
       if (pathname === "/cle") return json(await handleKeyCheck(env), 200, cors);
+      if (pathname.startsWith("/carnet/")) return json(await handleCarnet(pathname.slice(8), body, env), 200, cors);
       if (pathname === "/page") return json(await handlePage(body, env), 200, cors);
       if (pathname === "/ia") return streamedJson(() => handleAi(body, env), cors, ctx);
       if (pathname === "/voix") return json(await handleVoice(body, env), 200, cors);
