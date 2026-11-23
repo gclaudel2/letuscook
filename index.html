@@ -259,6 +259,9 @@
   .tab .count { font-variant-numeric: tabular-nums; opacity: 0.7; }
 
   .field-label { display: block; font-weight: 650; margin-bottom: 8px; }
+  .ai-consent { display: flex; gap: 10px; align-items: flex-start; margin: 12px 0; font-size: 15px; line-height: 1.4; }
+  #ai-group a.btn { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; color: var(--ink); }
+  .ai-consent input { flex: none; width: 22px; height: 22px; margin-top: 1px; accent-color: var(--accent); }
   .url-row { display: flex; gap: 8px; }
   .input {
     width: 100%; min-width: 0; height: 56px; padding: 0 16px;
@@ -684,6 +687,19 @@ window.applyTheme = function (name) {
       <input class="input" id="set-code" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Le code ACCESS_CODE du relais">
       <p>Laissez vide si le relais n'exige pas de code, ou si le code est déjà prévu par l'appli.</p>
     </div>
+    <div class="group" id="ai-group" hidden>
+      <label class="field-label" for="set-ai-key">IA personnelle <small class="muted-inline">facultatif</small></label>
+      <p>Avec votre propre clé Gemini (gratuite chez Google), Let Us Cook lit aussi les pages de recettes difficiles et les recettes manuscrites en photo, et lit les étapes avec une voix naturelle.</p>
+      <input class="input" id="set-ai-key" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Votre clé Gemini (commence par AIza…)">
+      <label class="ai-consent"><input type="checkbox" id="set-ai-consent">
+        <span>J'accepte que, quand j'utilise l'IA, le texte des pages de recettes, mes photos de recettes et les étapes à lire soient envoyés à <strong>Google (Gemini)</strong> avec ma clé, via le relais Let Us Cook qui ne les conserve pas.</span></label>
+      <div class="url-row">
+        <button type="button" class="btn" id="btn-ai-test" style="flex:1">Tester la clé</button>
+        <a class="btn" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style="flex:1">Obtenir une clé</a>
+      </div>
+      <p id="ai-status" role="status"></p>
+      <p>Il faut avoir 18 ans pour créer une clé. Avec une clé gratuite, Google peut utiliser ces contenus pour améliorer ses services. Votre clé reste sur cet iPhone ; videz le champ pour arrêter d'utiliser l'IA.</p>
+    </div>
     <div class="group">
       <span class="field-label">Sites de recherche <small id="sites-count" class="muted-inline"></small></span>
       <div id="sites-manager"></div>
@@ -706,14 +722,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.23.0"></script>
-<script src="extracteur.js?v=2.23.0"></script>
+<script src="config.js?v=2.24.0"></script>
+<script src="extracteur.js?v=2.24.0"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.23.0";
+const APP_VERSION = "2.24.0";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -3264,6 +3280,12 @@ function openSettings() {
   $("#set-worker").placeholder = ZBC.getWorkerUrl() || "https://zbc-relais.….workers.dev";
   $("#set-code").value = code;
   document.querySelectorAll("#settings .relay-group").forEach((g) => { g.hidden = !!(ZBC.APP && ZBC.APP.key); }); // app App Store : relais intégré
+  $("#ai-group").hidden = !ZBC.APP; // clé IA personnelle : seulement dans l'app App Store (la version web a l'IA du relais)
+  try {
+    $("#set-ai-key").value = localStorage.getItem(ZBC.USER_AI_KEY) || "";
+    $("#set-ai-consent").checked = localStorage.getItem(ZBC.USER_AI_CONSENT) === "oui";
+  } catch { /* */ }
+  $("#ai-status").textContent = ZBC.APP ? (ZBC.userAiKey() ? "IA activée avec votre clé." : "IA désactivée.") : "";
   $("#settings-version").textContent = `Let Us Cook · version ${APP_VERSION}${Native ? " · app iPhone" : ""}`;
   sitesUI.editing = null; sitesUI.test = null;
   renderSitesManager();
@@ -3293,8 +3315,28 @@ $("#settings").addEventListener("close", () => {
     worker ? localStorage.setItem(ZBC.WORKER_URL_KEY, worker) : localStorage.removeItem(ZBC.WORKER_URL_KEY);
     const code = $("#set-code").value;
     code ? localStorage.setItem(ZBC.ACCESS_CODE_KEY, code) : localStorage.removeItem(ZBC.ACCESS_CODE_KEY);
+    if (ZBC.APP) {
+      const aiKey = $("#set-ai-key").value.trim(), consent = $("#set-ai-consent").checked;
+      aiKey ? localStorage.setItem(ZBC.USER_AI_KEY, aiKey) : localStorage.removeItem(ZBC.USER_AI_KEY);
+      consent ? localStorage.setItem(ZBC.USER_AI_CONSENT, "oui") : localStorage.removeItem(ZBC.USER_AI_CONSENT);
+      Voice.disabled = false; Voice.pausedUntil = 0;
+      if (aiKey && !consent) { toast("Clé enregistrée, mais l'IA reste coupée : cochez l'accord pour l'activer."); }
+      else toast(aiKey ? "Réglages enregistrés · IA activée" : "Réglages enregistrés");
+      if (!/^#\/(r\/|apercu)/.test(location.hash)) renderHome();
+      return;
+    }
     toast("Réglages enregistrés");
   } catch { toast("Réglages non enregistrés (stockage indisponible)."); }
+});
+
+$("#btn-ai-test").addEventListener("click", async () => {
+  const key = $("#set-ai-key").value.trim(), status = $("#ai-status");
+  if (!key) { status.textContent = "Collez d'abord votre clé."; return; }
+  status.textContent = "Vérification auprès de Google…";
+  try {
+    const res = await ZBC.checkUserAiKey(key);
+    status.textContent = res.note || ($("#set-ai-consent").checked ? "Clé valide ✓ Enregistrez pour activer l'IA." : "Clé valide ✓ Cochez l'accord, puis enregistrez.");
+  } catch (err) { status.textContent = err.message || "Clé non vérifiée."; }
 });
 
 $("#btn-export").addEventListener("click", () => {

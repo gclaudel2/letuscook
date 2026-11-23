@@ -23,7 +23,13 @@
   const ACCESS_CODE_KEY = "zbc.accessCode"; // code facultatif, saisi une fois dans les réglages
   // App iPhone publiée (App Store) : clé du relais fournie par l'app, et jamais d'IA
   const APP = (window.LUC_APP && typeof window.LUC_APP === "object") ? window.LUC_APP : null;
-  const NO_AI = !!(APP && APP.noAI);
+  // IA de l'app : uniquement avec la clé Gemini personnelle de l'utilisateur (et son accord), jamais celle du relais
+  const USER_AI_KEY = "zbc.userAiKey", USER_AI_CONSENT = "zbc.userAiConsent";
+  function userAiKey() {
+    if (!APP) return "";
+    try { return localStorage.getItem(USER_AI_CONSENT) === "oui" ? (localStorage.getItem(USER_AI_KEY) || "").trim() : ""; } catch { return ""; }
+  }
+  const noAI = () => !!(APP && APP.noAI) && !userAiKey();
   const WORKER_URL_KEY = "zbc.workerUrl"; // adresse du relais saisie dans les réglages (prioritaire)
 
   function readSetting(key) {
@@ -1084,7 +1090,8 @@
   }
 
   // ── Appels au relais ───────────────────────────────────────────
-  async function callWorker(path, body) {
+  const AI_PATHS = new Set(["/ia", "/photo", "/voix", "/cle"]);
+  async function callWorker(path, body, opts = {}) {
     const workerUrl = getWorkerUrl();
     if (!workerUrl) throw new ExtractError("NO_RELAY", "Indiquez d'abord l'adresse du relais dans les Réglages.");
     const accessCode = readSetting(ACCESS_CODE_KEY) || CONFIG.ACCESS_CODE;
@@ -1095,6 +1102,7 @@
         headers: {
           "content-type": "application/json",
           ...(APP && APP.key ? { "x-app-key": APP.key } : accessCode ? { "x-access-code": accessCode } : {}),
+          ...(APP && AI_PATHS.has(path) && (opts.userKey || userAiKey()) ? { "x-user-ai-key": opts.userKey || userAiKey() } : {}),
         },
         body: JSON.stringify(body),
       });
@@ -1205,7 +1213,7 @@
     }
 
     const hasPartial = !!partial && (partial.ingredients.length > 0 || partial.steps.length > 0);
-    if (NO_AI) { // app App Store : pas d'analyse par l'IA
+    if (noAI()) { // app App Store sans clé IA personnelle : pas d'analyse par l'IA
       if (hasPartial) {
         log("Recette partielle conservée (lecture du texte)", "warn");
         return { recipe: partial, warnings: ["Recette incomplète : cette page n'est pas lisible entièrement sans IA. Vérifiez sur le site d'origine."] };
@@ -1905,8 +1913,12 @@
     return { recipe, complete, finalUrl };
   }
 
+  /** Vérifie une clé Gemini personnelle via le relais (rien n'est généré). */
+  async function checkUserAiKey(key) { return callWorker("/cle", {}, { userKey: String(key || "").trim() }); }
+
   window.ZBC = {
-    CONFIG, ACCESS_CODE_KEY, WORKER_URL_KEY, getWorkerUrl, ExtractError, NO_AI, APP,
+    CONFIG, ACCESS_CODE_KEY, WORKER_URL_KEY, getWorkerUrl, ExtractError, APP, USER_AI_KEY, USER_AI_CONSENT, userAiKey, checkUserAiKey,
+    get NO_AI() { return noAI(); },
     extractRecipe, extractFromHtml, parseTargetUrl, searchRecipes, readPhotos, recipeFromText, photosToRecipeAI, analyzeUrl, previewImages, rememberImage, cachedImage, synthesize, refreshChefIndex, chefIndexStatus, chefIndexStale, setChefSourceEnabled, CHEF_CATALOGS, detectChefSource, addChefSource, removeChefSource, chefIndexItems, chefIndexCount, matchesQuery, queryWords, getSearchSites, saveSearchSites, resetSearchSites, rememberRemovedSite, normalizeHost, testSearchSite, DEFAULT_SEARCH_SITES,
     parseIngredient, formatIngredient, formatQuantity, parseDuration, parseServings,
   };

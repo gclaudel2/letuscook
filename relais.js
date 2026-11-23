@@ -15,7 +15,8 @@
  *   ALLOWED_ORIGINS    ex. "https://votre-compte.github.io"  (plusieurs : séparées par des virgules)
  *   ACCESS_CODE        facultatif mais conseillé : code à saisir une fois dans l'appli   [Secret]
  *   APP_KEY            clé de l'app iPhone « Let Us Cook » (App Store) : remplace le code d'accès  [Secret]
- *                      Les demandes faites avec cette clé n'ont jamais accès à l'IA (/ia, /photo, /voix).
+ *                      Avec cette clé, l'IA (/ia, /photo, /voix) n'utilise JAMAIS les clés du relais : seulement la clé
+ *                      Gemini personnelle de l'utilisateur (en-tête x-user-ai-key), utilisée pour sa demande puis oubliée.
  *   Clés IA, toutes facultatives [Secret]. Avec plusieurs clés, le relais les essaie à tour de rôle
  *   si l'une est en panne ou saturée :
  *     GEMINI_API_KEY     (Google AI Studio, gratuit)   GEMINI_MODEL    défaut : gemini-flash-latest
@@ -75,7 +76,7 @@ function corsHeaders(request) {
     ? {
         "access-control-allow-origin": origin,
         "access-control-allow-methods": "POST, OPTIONS",
-        "access-control-allow-headers": "content-type, x-access-code, x-app-key",
+        "access-control-allow-headers": "content-type, x-access-code, x-app-key, x-user-ai-key",
         "access-control-max-age": "86400",
         vary: "origin",
       }
@@ -142,7 +143,35 @@ async function checkAccess(request, env) {
   }
   return { app: !!appKey };
 }
-const AI_ROUTES = new Set(["/ia", "/photo", "/voix"]);
+const AI_ROUTES = new Set(["/ia", "/photo", "/voix", "/cle"]);
+
+/**
+ * App App Store : l'IA ne tourne qu'avec la clé Gemini de l'utilisateur. On fabrique un « env » propre à la demande,
+ * sans aucune des clés IA du relais. La clé n'est ni enregistrée ni journalisée.
+ */
+function userAiEnv(request, env) {
+  const key = (request.headers.get("x-user-ai-key") || "").trim();
+  if (!/^[A-Za-z0-9_\-]{20,100}$/.test(key)) {
+    throw new RelayError("AI_DISABLED", "Pour utiliser l'IA, ajoutez votre clé Gemini personnelle dans les Réglages de l'app.", 403);
+  }
+  const own = { ...env };
+  for (const k of ["GEMINI_API_KEY", "MISTRAL_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"]) delete own[k];
+  return { ...own, GEMINI_API_KEY: key, LLM_PROVIDER: "gemini" };
+}
+
+// ── /cle : vérifie une clé Gemini personnelle (liste des modèles, rien n'est généré) ──
+async function handleKeyCheck(env) {
+  let res;
+  try {
+    res = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=1", {
+      headers: { "x-goog-api-key": env.GEMINI_API_KEY }, signal: AbortSignal.timeout(10000),
+    });
+  } catch { throw new RelayError("LLM_FAILED", "Google ne répond pas, réessayez dans un instant.", 502); }
+  if (res.ok) return { ok: true };
+  if (res.status === 400 || res.status === 401 || res.status === 403) throw new RelayError("INVALID_KEY", "Clé refusée par Google : vérifiez-la (elle commence en général par « AIza »).", 400);
+  if (res.status === 429) return { ok: true, note: "Clé valide, mais quota atteint pour le moment." };
+  throw new RelayError("LLM_FAILED", `Google a répondu ${res.status}.`, 502);
+}
 
 // ── /page : récupération sécurisée ───────────────────────────────
 function assertAllowedUrl(raw) {
@@ -789,9 +818,12 @@ export default {
         );
       }
       const access = await checkAccess(request, env);
-      // L'app App Store n'utilise jamais l'IA (conditions de Gemini : pas d'app publique en Europe ni pour les moins de 18 ans)
-      if (access.app && AI_ROUTES.has(pathname)) throw new RelayError("AI_DISABLED", "Les fonctions IA ne sont pas disponibles dans l'app.", 403);
+      // App App Store : jamais les clés IA du relais (conditions de Gemini : pas d'app publique en Europe ni pour les
+      // moins de 18 ans) ; seulement la clé personnelle de l'utilisateur, s'il en a mis une dans les Réglages.
+      if (access.app && AI_ROUTES.has(pathname)) env = userAiEnv(request, env);
+      else if (pathname === "/cle") throw new RelayError("NOT_FOUND", "Route réservée à l'app.", 404);
       const body = await request.json().catch(() => null);
+      if (pathname === "/cle") return json(await handleKeyCheck(env), 200, cors);
       if (pathname === "/page") return json(await handlePage(body, env), 200, cors);
       if (pathname === "/ia") return streamedJson(() => handleAi(body, env), cors, ctx);
       if (pathname === "/voix") return json(await handleVoice(body, env), 200, cors);
