@@ -29,7 +29,12 @@
     if (!APP) return "";
     try { return localStorage.getItem(USER_AI_CONSENT) === "oui" ? (localStorage.getItem(USER_AI_KEY) || "").trim() : ""; } catch { return ""; }
   }
-  const noAI = () => !!(APP && APP.noAI) && !userAiKey();
+  // IA offerte par le propriétaire du relais (lien « IA » reçu d'un ami) : { code, from, name }
+  const AI_PASS = "zbc.aiPass";
+  function aiPass() {
+    try { const p = JSON.parse(localStorage.getItem(AI_PASS) || "null"); return p && p.code ? p : null; } catch { return null; }
+  }
+  const noAI = () => !!(APP && APP.noAI) && !userAiKey() && !aiPass();
   const WORKER_URL_KEY = "zbc.workerUrl"; // adresse du relais saisie dans les réglages (prioritaire)
 
   function readSetting(key) {
@@ -1102,7 +1107,8 @@
         headers: {
           "content-type": "application/json",
           ...(APP && APP.key ? { "x-app-key": APP.key } : accessCode ? { "x-access-code": accessCode } : {}),
-          ...(APP && AI_PATHS.has(path) && (opts.userKey || userAiKey()) ? { "x-user-ai-key": opts.userKey || userAiKey() } : {}),
+          ...(APP && AI_PATHS.has(path) && (opts.userKey || userAiKey()) ? { "x-user-ai-key": opts.userKey || userAiKey() }
+            : APP && AI_PATHS.has(path) && aiPass() ? { "x-ai-pass": aiPass().code } : {}),
         },
         body: JSON.stringify(body),
       });
@@ -1124,6 +1130,7 @@
         ? "La réponse du relais a été coupée avant la fin (lecture trop longue). Réessayez ; si ça recommence, vérifiez que relais.js est bien à jour dans Cloudflare."
         : `Réponse illisible du relais : ${raw.trim().slice(0, 120)}`);
     }
+    if (data?.error?.code === "PASS_REVOKED" && AI_PATHS.has(path)) { try { localStorage.removeItem(AI_PASS); } catch { /* */ } }
     if (!res.ok || !data || data.ok === false) {
       throw new ExtractError(data?.error?.code || "FETCH_FAILED", data?.error?.message || `Erreur du relais (${res.status}).`);
     }
@@ -1918,6 +1925,7 @@
 
   window.ZBC = {
     CONFIG, ACCESS_CODE_KEY, WORKER_URL_KEY, getWorkerUrl, ExtractError, APP, USER_AI_KEY, USER_AI_CONSENT, userAiKey, checkUserAiKey,
+    AI_PASS, aiPass,
     get NO_AI() { return noAI(); },
     callRelay: (path, body) => callWorker(path, body),
     extractRecipe, extractFromHtml, parseTargetUrl, searchRecipes, readPhotos, recipeFromText, photosToRecipeAI, analyzeUrl, previewImages, rememberImage, cachedImage, synthesize, refreshChefIndex, chefIndexStatus, chefIndexStale, setChefSourceEnabled, CHEF_CATALOGS, detectChefSource, addChefSource, removeChefSource, chefIndexItems, chefIndexCount, matchesQuery, queryWords, getSearchSites, saveSearchSites, resetSearchSites, rememberRemovedSite, normalizeHost, testSearchSite, DEFAULT_SEARCH_SITES,

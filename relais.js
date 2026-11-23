@@ -16,6 +16,7 @@
  *   ALLOWED_ORIGINS    ex. "https://votre-compte.github.io"  (plusieurs : séparées par des virgules)
  *   ACCESS_CODE        facultatif mais conseillé : code à saisir une fois dans l'appli   [Secret]
  *   CARNETS            (Bindings › D1 database) base D1 pour les carnets partagés ; tables créées automatiquement
+ *   AI_PASS_MONTHLY    (facultatif) nombre d'utilisations de l'IA par mois pour chaque accès offert à un ami (défaut 300)
  *   APP_KEY            clé de l'app iPhone « Let Us Cook » (App Store) : remplace le code d'accès  [Secret]
  *                      Avec cette clé, l'IA (/ia, /photo, /voix) n'utilise JAMAIS les clés du relais : seulement la clé
  *                      Gemini personnelle de l'utilisateur (en-tête x-user-ai-key), utilisée pour sa demande puis oubliée.
@@ -78,7 +79,7 @@ function corsHeaders(request) {
     ? {
         "access-control-allow-origin": origin,
         "access-control-allow-methods": "POST, OPTIONS",
-        "access-control-allow-headers": "content-type, x-access-code, x-app-key, x-user-ai-key",
+        "access-control-allow-headers": "content-type, x-access-code, x-app-key, x-user-ai-key, x-ai-pass",
         "access-control-max-age": "86400",
         vary: "origin",
       }
@@ -949,6 +950,62 @@ async function handleCarnet(action, body, env) {
   throw new RelayError("NOT_FOUND", "Action de carnet inconnue.", 404);
 }
 
+// ── IA offerte : le propriétaire du relais donne à un ami un accès à sa clé, sans la dévoiler ──
+// Chaque ami reçoit son propre lien (révocable, plafonné chaque mois). La clé IA ne quitte jamais le relais.
+let passSchema = null;
+async function passDb(env) {
+  if (!env.CARNETS) throw new RelayError("NO_DB", "Base D1 « CARNETS » à relier au Worker pour offrir l'IA.", 501);
+  passSchema ??= env.CARNETS.prepare("CREATE TABLE IF NOT EXISTS ai_passes (id TEXT PRIMARY KEY, token_hash TEXT NOT NULL, name TEXT NOT NULL, created_at INTEGER NOT NULL, revoked INTEGER NOT NULL DEFAULT 0, from_name TEXT NOT NULL DEFAULT '', month TEXT NOT NULL DEFAULT '', month_uses INTEGER NOT NULL DEFAULT 0, total_uses INTEGER NOT NULL DEFAULT 0, last_used INTEGER)").run();
+  await passSchema;
+  return env.CARNETS;
+}
+const passMonthly = (env) => Math.max(1, Number(env.AI_PASS_MONTHLY) || 300);
+const thisMonth = () => new Date().toISOString().slice(0, 7);
+async function findPass(env, code) {
+  const m = /^([A-Za-z0-9_-]{6,40})\.([A-Za-z0-9_-]{16,64})$/.exec(String(code || "").replace(/^ia--/, ""));
+  if (!m) return null;
+  const db = await passDb(env);
+  const row = await db.prepare("SELECT * FROM ai_passes WHERE id = ? AND token_hash = ?").bind(m[1], await tokenHash(m[2])).first();
+  if (!row || row.revoked) throw new RelayError("PASS_REVOKED", "L'accès à l'IA qu'on vous avait offert a été retiré.", 403);
+  return { db, row, used: row.month === thisMonth() ? row.month_uses : 0 };
+}
+async function useAiPass(request, env, count) {
+  const found = await findPass(env, request.headers.get("x-ai-pass"));
+  if (!found) throw new RelayError("PASS_REVOKED", "Lien d'accès à l'IA non reconnu.", 403);
+  if (found.used >= passMonthly(env)) throw new RelayError("PASS_QUOTA", "L'IA offerte a atteint sa limite pour ce mois-ci. Elle revient le mois prochain.", 429);
+  if (count) {
+    await found.db.prepare("UPDATE ai_passes SET month = ?, month_uses = ?, total_uses = total_uses + 1, last_used = ? WHERE id = ?")
+      .bind(thisMonth(), found.used + 1, Date.now(), found.row.id).run();
+  }
+}
+async function handleAiPass(action, body, env) {
+  if (action === "verifier") {
+    const found = await findPass(env, body?.pass);
+    if (!found) throw new RelayError("PASS_REVOKED", "Lien d'accès à l'IA non reconnu.", 403);
+    return { ok: true, name: found.row.name, from: found.row.from_name, left: passMonthly(env) - found.used, monthly: passMonthly(env) };
+  }
+  // Le reste est réservé au propriétaire : il prouve qui il est avec le code d'accès du relais (ACCESS_CODE)
+  if (!env.ACCESS_CODE || !(await sameSecret(body?.owner, env.ACCESS_CODE))) {
+    throw new RelayError("NOT_OWNER", "Code d'accès du relais incorrect : seul le propriétaire du relais peut offrir l'IA.", 403);
+  }
+  const db = await passDb(env);
+  if (action === "creer") {
+    const id = randomId(9), secret = randomId(24), name = cleanName(body?.name, 30) || "Ami", from = cleanName(body?.from, 30);
+    await db.prepare("INSERT INTO ai_passes (id, token_hash, name, from_name, created_at) VALUES (?, ?, ?, ?, ?)").bind(id, await tokenHash(secret), name, from, Date.now()).run();
+    return { id, name, code: `ia--${id}.${secret}` };
+  }
+  if (action === "liste") {
+    const { results } = await db.prepare("SELECT id, name, created_at, month, month_uses, total_uses, last_used FROM ai_passes WHERE revoked = 0 ORDER BY created_at DESC").all();
+    const month = thisMonth();
+    return { monthly: passMonthly(env), passes: (results || []).map((r) => ({ id: r.id, name: r.name, createdAt: r.created_at, monthUses: r.month === month ? r.month_uses : 0, totalUses: r.total_uses, lastUsed: r.last_used })) };
+  }
+  if (action === "revoquer") {
+    await db.prepare("UPDATE ai_passes SET revoked = 1 WHERE id = ?").bind(String(body?.id || "")).run();
+    return { ok: true };
+  }
+  throw new RelayError("NOT_FOUND", "Action inconnue.", 404);
+}
+
 // ── Liens d'invitation : ouvrent l'app iPhone (lien universel), sinon la version web ──
 // Apple lit ce fichier pour savoir que les liens /rejoindre/… de ce relais appartiennent à l'app Let Us Cook.
 const IOS_APP_IDS = ["M2838V3J42.com.letusgeek.letuscook"];
@@ -971,7 +1028,7 @@ function invitePage(request) {
   return new Response(`<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Invitation · Let Us Cook</title><meta http-equiv="refresh" content="0;url=${esc(target)}">
 <style>body{font:17px/1.5 -apple-system,system-ui,sans-serif;background:#1f2a26;color:#f3efe4;display:grid;place-items:center;min-height:100vh;margin:0;padding:24px;text-align:center}a{color:#e8b84a}</style></head>
-<body><div><h1>Let Us Cook</h1><p>Ouverture du carnet partagé…</p><p><a href="${esc(target)}">Continuer</a></p></div>
+<body><div><h1>Let Us Cook</h1><p>Ouverture de Let Us Cook…</p><p><a href="${esc(target)}">Continuer</a></p></div>
 <script>location.replace(${JSON.stringify(target)})</script></body></html>`, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
 }
 
@@ -999,9 +1056,13 @@ export default {
       const access = await checkAccess(request, env);
       // App App Store : jamais les clés IA du relais (conditions de Gemini : pas d'app publique en Europe ni pour les
       // moins de 18 ans) ; seulement la clé personnelle de l'utilisateur, s'il en a mis une dans les Réglages.
-      if (access.app && AI_ROUTES.has(pathname)) env = userAiEnv(request, env);
-      else if (pathname === "/cle") throw new RelayError("NOT_FOUND", "Route réservée à l'app.", 404);
+      if (access.app && AI_ROUTES.has(pathname)) {
+        // clé personnelle de l'utilisateur, sinon accès offert par le propriétaire du relais (lien « IA »)
+        if (!request.headers.get("x-user-ai-key") && request.headers.get("x-ai-pass")) await useAiPass(request, env, pathname !== "/cle");
+        else env = userAiEnv(request, env);
+      } else if (pathname === "/cle") throw new RelayError("NOT_FOUND", "Route réservée à l'app.", 404);
       const body = await request.json().catch(() => null);
+      if (pathname.startsWith("/acces/")) return json(await handleAiPass(pathname.slice(7), body, env), 200, cors);
       if (pathname === "/cle") return json(await handleKeyCheck(env), 200, cors);
       if (pathname.startsWith("/carnet/")) return json(await handleCarnet(pathname.slice(8), body, env), 200, cors);
       if (pathname === "/page") return json(await handlePage(body, env), 200, cors);

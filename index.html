@@ -716,6 +716,19 @@ window.applyTheme = function (name) {
       <p id="ai-status" role="status"></p>
       <p>Il faut avoir 18 ans pour créer une clé. Avec une clé gratuite, Google peut utiliser ces contenus pour améliorer ses services. Votre clé reste sur cet iPhone ; videz le champ pour arrêter d'utiliser l'IA.</p>
     </div>
+    <div class="group" id="gift-group" hidden>
+      <details id="gift-details">
+        <summary class="field-label">Offrir mon IA à des amis <small class="muted-inline">propriétaire du relais</small></summary>
+        <p>Chaque ami reçoit son propre lien : il le touche et l'IA s'active dans son app, avec la clé de votre relais, qui reste secrète. Vous pouvez retirer un accès à tout moment ; chaque accès est plafonné chaque mois.</p>
+        <label class="field-label" for="set-owner-code">Code d'accès de votre relais (ACCESS_CODE)</label>
+        <input class="input" id="set-owner-code" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Le code ACCESS_CODE défini sur Cloudflare">
+        <div class="url-row" style="margin-top:8px">
+          <button type="button" class="btn primary" id="btn-gift-new" style="flex:1">Inviter un ami</button>
+          <button type="button" class="btn" id="btn-gift-list" style="flex:1">Voir les accès</button>
+        </div>
+        <ul class="members" id="gift-list"></ul>
+      </details>
+    </div>
     <div class="group">
       <span class="field-label">Sites de recherche <small id="sites-count" class="muted-inline"></small></span>
       <div id="sites-manager"></div>
@@ -738,14 +751,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.26.0"></script>
-<script src="extracteur.js?v=2.26.0"></script>
+<script src="config.js?v=2.27.0"></script>
+<script src="extracteur.js?v=2.27.0"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.26.0";
+const APP_VERSION = "2.27.0";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1137,6 +1150,7 @@ function openNewBook() {
 }
 
 async function joinBook(bookId, invite) {
+  if (bookId.startsWith("ia--")) return acceptAiPass(`${bookId}.${invite}`); // lien « IA offerte »
   if (Books.get(bookId)) { Books.setCurrent(bookId); toast("Vous êtes déjà dans ce carnet."); return go("#/carnet", true); }
   const me = askMyName();
   if (!me) return go("#/carnet", true);
@@ -3684,7 +3698,10 @@ function openSettings() {
     $("#set-ai-key").value = localStorage.getItem(ZBC.USER_AI_KEY) || "";
     $("#set-ai-consent").checked = localStorage.getItem(ZBC.USER_AI_CONSENT) === "oui";
   } catch { /* */ }
-  $("#ai-status").textContent = ZBC.APP ? (ZBC.userAiKey() ? "IA activée avec votre clé." : "IA désactivée.") : "";
+  drawAiStatus();
+  $("#gift-group").hidden = !ZBC.APP;
+  $("#set-owner-code").value = store.get("zbc.ownerCode", "");
+  $("#gift-list").replaceChildren();
   $("#settings-version").textContent = `Let Us Cook · version ${APP_VERSION}${Native ? " · app iPhone" : ""}`;
   sitesUI.editing = null; sitesUI.test = null;
   renderSitesManager();
@@ -3727,6 +3744,92 @@ $("#settings").addEventListener("close", () => {
     toast("Réglages enregistrés");
   } catch { toast("Réglages non enregistrés (stockage indisponible)."); }
 });
+
+/* ── IA offerte par un ami (lien « IA ») et IA offerte à mes amis ── */
+function drawAiStatus() {
+  const status = $("#ai-status");
+  if (!ZBC.APP) { status.textContent = ""; return; }
+  const pass = ZBC.aiPass();
+  if (ZBC.userAiKey()) status.textContent = "IA activée avec votre clé.";
+  else if (pass) {
+    status.replaceChildren(`IA offerte par ${pass.from || "un ami"} ✓ `, h("button", { type: "button", class: "btn small", onclick: () => {
+      if (!confirm("Ne plus utiliser l'IA offerte ?")) return;
+      try { localStorage.removeItem(ZBC.AI_PASS); } catch { /* */ }
+      drawAiStatus(); toast("IA offerte retirée");
+    } }, "Ne plus l'utiliser"));
+  } else status.textContent = "IA désactivée.";
+}
+const relayLink = (code) => {
+  const relay = ZBC.getWorkerUrl();
+  return relay ? `${relay}/rejoindre/${code}?app=${encodeURIComponent(APP_URL())}` : `${APP_URL()}#/rejoindre/${code}`;
+};
+
+async function acceptAiPass(code) {
+  go("#/carnet", true);
+  if (!ZBC.APP) { toast("Ce lien active l'IA dans l'app iPhone Let Us Cook : ouvrez-le sur l'iPhone où l'app est installée."); return; }
+  let info;
+  try { info = await ZBC.callRelay("/acces/verifier", { pass: code }); }
+  catch (err) { toast(err.message || "Lien d'accès à l'IA non reconnu."); return; }
+  const from = info.from || "Un ami";
+  if (!confirm(`${from} vous offre l'IA dans Let Us Cook (${info.monthly} utilisations par mois).\n\nQuand vous l'utilisez, le texte des pages de recettes, vos photos de recettes et les étapes lues à voix haute sont envoyés à Google (Gemini) via le relais Let Us Cook, qui ne les conserve pas.\n\nActiver l'IA ?`)) return;
+  try { localStorage.setItem(ZBC.AI_PASS, JSON.stringify({ code, from: info.from || "", name: info.name || "" })); } catch { toast("Stockage indisponible."); return; }
+  Voice.disabled = false; Voice.pausedUntil = 0;
+  toast(`IA activée, offerte par ${from}`);
+  renderHome();
+}
+
+const ownerCode = () => { const c = $("#set-owner-code").value.trim(); store.set("zbc.ownerCode", c); return c; };
+$("#btn-gift-new").addEventListener("click", async (e) => {
+  const owner = ownerCode();
+  if (!owner) { toast("Entrez d'abord le code d'accès de votre relais."); $("#set-owner-code").focus(); return; }
+  const name = (prompt("Prénom de l'ami à qui vous offrez l'IA", "") || "").trim();
+  if (!name) return;
+  const from = askMyName();
+  const btn = e.currentTarget;
+  btn.disabled = true;
+  try {
+    const res = await ZBC.callRelay("/acces/creer", { owner, name, from });
+    openGiftShare(name, relayLink(res.code), from);
+    loadGiftList();
+  } catch (err) { toast(err.message || "Création impossible."); }
+  finally { btn.disabled = false; }
+});
+$("#btn-gift-list").addEventListener("click", () => loadGiftList());
+async function loadGiftList() {
+  const list = $("#gift-list"), owner = ownerCode();
+  if (!owner) { toast("Entrez d'abord le code d'accès de votre relais."); return; }
+  list.replaceChildren(h("li", { class: "member" }, "Chargement…"));
+  try {
+    const res = await ZBC.callRelay("/acces/liste", { owner });
+    list.replaceChildren(...(res.passes.length ? res.passes.map((p) => h("li", { class: "member" },
+      h("span", {}, p.name, h("small", { class: "muted-inline" }, ` · ${p.monthUses}/${res.monthly} ce mois-ci`)),
+      h("button", { type: "button", class: "btn small", onclick: async () => {
+        if (!confirm(`Retirer l'accès à l'IA de ${p.name} ?`)) return;
+        try { await ZBC.callRelay("/acces/revoquer", { owner, id: p.id }); toast(`Accès de ${p.name} retiré`); loadGiftList(); } catch (err) { toast(err.message); }
+      } }, "Retirer"))) : [h("li", { class: "member" }, "Aucun accès offert pour l'instant.")]));
+  } catch (err) { list.replaceChildren(); toast(err.message); }
+}
+function openGiftShare(name, link, from) {
+  const text = `${from ? `${from} t'offre` : "Je t'offre"} l'IA dans Let Us Cook (lecture des recettes difficiles, photos de recettes, voix naturelle).\nTouche ce lien sur ton iPhone pour l'activer :\n${link}`;
+  const enc = encodeURIComponent;
+  const close = () => dlg.close();
+  const opt = (iconName, label, onclick, href) => href
+    ? h("a", { class: "btn share-opt", href, target: "_blank", rel: "noopener", onclick: () => setTimeout(close, 300) }, icon(iconName), label)
+    : h("button", { type: "button", class: "btn share-opt", onclick }, icon(iconName), label);
+  const dlg = h("dialog", { class: "share-dlg", "aria-labelledby": "gift-title" },
+    h("h2", { id: "gift-title", tabindex: "-1" }, `Envoyer à ${name}`),
+    h("p", { class: "site-help" }, "Ce lien est personnel : envoyez-le seulement à cet ami. Vous pourrez retirer son accès dans les Réglages."),
+    h("div", { class: "share-opts" },
+      navigator.share && opt("share", "Partager… (Messages, WhatsApp, Mail…)", async () => { try { await navigator.share({ title: "L'IA de Let Us Cook", text }); close(); } catch { /* annulé */ } }),
+      opt("chat", "WhatsApp", null, `https://wa.me/?text=${enc(text)}`),
+      opt("message", "SMS / iMessage", null, `sms:&body=${enc(text)}`),
+      opt("mail", "E-mail", null, `mailto:?subject=${enc("L'IA de Let Us Cook")}&body=${enc(text)}`),
+      opt("copy", "Copier le lien", async () => { try { await navigator.clipboard.writeText(link); toast("Lien copié"); close(); } catch { toast("Copie impossible"); } })),
+    h("button", { type: "button", class: "btn", style: "width:100%;margin-top:10px", onclick: close }, "Fermer"));
+  dlg.addEventListener("close", () => dlg.remove());
+  ($("#settings").open ? $("#settings") : document.body).append(dlg);
+  dlg.showModal();
+}
 
 $("#btn-ai-test").addEventListener("click", async () => {
   const key = $("#set-ai-key").value.trim(), status = $("#ai-status");
