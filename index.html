@@ -561,6 +561,11 @@
   .faim-people { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 6px; }
   .faim-people .round-btn { width: 48px; height: 48px; border-radius: 50%; border: 2px solid var(--line); background: var(--surface); color: var(--ink); font: 700 24px/1 var(--rounded); }
   .faim-surprise { width: 100%; margin-top: 12px; }
+  .faim-picked { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 10px; }
+  .faim-pill { display: inline-flex; align-items: center; gap: 6px; height: 38px; padding: 0 10px 0 14px; border-radius: var(--pill); border: 0; background: var(--accent); color: var(--accent-ink); font: 700 15px/1 var(--rounded); }
+  .faim-pill svg { width: 16px; height: 16px; }
+  .faim-body .url-row .btn { height: 56px; flex: none; padding: 0 16px; }
+  .filter:disabled { opacity: .4; }
   .faim-actions { display: flex; gap: 10px; margin-top: 18px; }
   .faim-actions .btn { flex: 1; margin: 0; padding: 0 12px; white-space: nowrap; font-size: 17px; }
   .faim-actions .btn.primary { flex: 2; }
@@ -583,10 +588,15 @@
   .sources { margin: -6px 2px 12px; font-size: 12px; color: var(--muted); }
   .search-status .sources { margin: 4px 0 0; }
   .search-status { margin: 16px 2px 10px; font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .search-status.loading { display: flex; flex-direction: column; gap: 8px; }
+  .search-status .progress { display: block; height: 6px; border-radius: 6px; background: var(--line); overflow: hidden; }
+  .search-status .progress > span { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width .35s ease; }
   .search-controls { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
   .segs { display: flex; gap: 4px; padding: 4px; border-radius: 12px; background: var(--line); }
   .seg { flex: 1; height: 36px; border: 0; border-radius: 9px; background: transparent; font-size: 14px; font-weight: 650; color: var(--muted); }
   .seg[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgb(0 0 0 / 0.12); }
+  .seg { white-space: nowrap; padding: 0 6px; }
+  @media (max-width: 360px) { .seg { font-size: 13px; padding: 0 4px; } .segs { gap: 2px; } }
   .filters { display: flex; gap: 8px; flex-wrap: wrap; }
   .filter { height: 36px; padding: 0 14px; border-radius: var(--pill); border: 1.5px solid var(--line); background: var(--surface); font-size: 14px; font-weight: 650; }
   .filter[aria-pressed="true"] { background: var(--chip-on); border-color: var(--chip-on); color: var(--chip-on-ink); }
@@ -843,14 +853,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.29.0"></script>
-<script src="extracteur.js?v=2.29.0"></script>
+<script src="config.js?v=2.30.0"></script>
+<script src="extracteur.js?v=2.30.0"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.29.0";
+const APP_VERSION = "2.30.0";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -2273,15 +2283,9 @@ function renderSearchPanel() {
   }
   if (S.error) parts.push(h("div", { class: "notice error", role: "alert" }, S.error));
 
-  if (S.loading && !S.results.length) {
-    const done = S.sources.length;
-    parts.push(h("div", { class: "search-status", id: "search-status", "aria-live": "polite" },
-      enabledSites().length ? `Recherche sur ${enabledSites().length} sites de recettes… ${done}/${enabledSites().length}` : "Recherche dans les recettes de chefs…",
-      done ? h("div", { class: "sources" }, sourcesText()) : null));
-  }
+  if (S.loading && !S.results.length) parts.push(renderSearchStatus());
   if (S.results.length) {
-    parts.push(h("div", { class: "search-status", id: "search-status", "aria-live": "polite" }, searchStatusText()));
-    if (S.sources.length) parts.push(h("div", { class: "sources" }, sourcesText()));
+    parts.push(renderSearchStatus());
     parts.push(renderSearchControls());
     parts.push(h("ul", { class: "results", id: "results" }, visibleResults().map(resultCard)));
   } else if (!S.loading) {
@@ -2317,17 +2321,36 @@ function shortError(msg) {
   return m.replace(/\.$/, "").slice(0, 50);
 }
 
+/** Avancement de la recherche (0 à 1), ou null quand tout est prêt : sites interrogés, puis recettes analysées. */
+function searchProgress() {
+  const S = state.search;
+  if (!S.loading) return null;
+  if (!S.results.length) return 0.04 + 0.36 * Math.min(1, S.sources.length / Math.max(1, enabledSites().length + 1));
+  const total = S.results.length;
+  const pending = S.results.filter((r) => r.status === "pending" || r.status === "loading").length;
+  return 0.4 + 0.6 * (total - pending) / total;
+}
+/** Ligne d'état pour l'utilisateur : une barre de progression simple, puis le nombre de recettes. */
+function renderSearchStatus() {
+  const p = searchProgress();
+  if (p == null) return h("div", { class: "search-status", id: "search-status", "aria-live": "polite" }, searchStatusText());
+  const label = state.search.results.length ? "Préparation des recettes…" : "Recherche de recettes…";
+  return h("div", { class: "search-status loading", id: "search-status", role: "progressbar", "aria-label": label, "aria-valuemin": "0", "aria-valuemax": "100", "aria-valuenow": String(Math.round(p * 100)) },
+    h("span", {}, label),
+    h("span", { class: "progress" }, h("span", { style: `width:${Math.round(p * 100)}%` })));
+}
+
 function searchStatusText() {
   const S = state.search;
   const total = S.results.length;
   const pending = S.results.filter((r) => r.status === "pending" || r.status === "loading").length;
   const ok = S.results.filter((r) => r.status === "ok").length;
-  if (pending) return `${total} résultat${total > 1 ? "s" : ""} · analyse des recettes ${total - pending}/${total}…`;
+  if (pending) return "Préparation des recettes…";
   if (S.mood) {
     const fit = faimFilter(S.results, S.mood).filter((r) => r.status === "ok").length;
     return fit ? `${fit} recette${fit > 1 ? "s" : ""} correspond${fit > 1 ? "ent" : ""} à vos envies (sur ${total})` : `Aucune des ${total} recettes ne correspond : touchez « Autre idée ».`;
   }
-  return `${ok} recette${ok > 1 ? "s" : ""} prête${ok > 1 ? "s" : ""} sur ${total} résultat${total > 1 ? "s" : ""}`;
+  return `${ok} recette${ok > 1 ? "s" : ""} trouvée${ok > 1 ? "s" : ""}`;
 }
 
 function renderSearchControls() {
@@ -2375,8 +2398,7 @@ function refreshResults(controlsToo = false) {
   const list = document.getElementById("results");
   if (!list) return;
   list.replaceChildren(...visibleResults().map(resultCard));
-  const status = document.getElementById("search-status");
-  if (status) status.textContent = searchStatusText();
+  document.getElementById("search-status")?.replaceWith(renderSearchStatus());
   if (controlsToo) document.getElementById("search-controls")?.replaceWith(renderSearchControls());
   if (!list.children.length) {
     list.append(h("li", { class: "empty" }, state.search.chef
@@ -3236,7 +3258,7 @@ function faimQuery(m) {
   else if (m.type === "entree" && m.ingredient) words.push(pick(["velouté", "salade", "entrée"]));
   else if (m.type === "apero" && m.ingredient) words.push("apéritif");
   else if (m.style === "reconfort" && m.ingredient && type === "plat") words.push(pick(["gratin", "mijoté", "au four", "crémeux"]));
-  if (FAIM_STYLE_WORD[m.style] && m.ingredient && !words.includes(FAIM_STYLE_WORD[m.style])) words.push(FAIM_STYLE_WORD[m.style]);
+  if (FAIM_STYLE_WORD[m.style] && m.ingredient && (m.ingredients || []).length < 2 && !words.includes(FAIM_STYLE_WORD[m.style])) words.push(FAIM_STYLE_WORD[m.style]);
   if (m.diet.includes("vegan") && !/vegan|végétal/i.test(words.join(" "))) words.push("vegan");
   else if (m.diet.includes("vege") && m.ingredient && !RE.meat.test(main)) words.push("végétarien");
   return words.join(" ");
@@ -3265,6 +3287,11 @@ function faimScore(res, m) {
   const t = totalMinutes(r);
   if (t == null) s += 3;
   if (r.rating) s -= Math.min(3, (r.rating.value - 3.5) * 2 + (r.rating.count > 30 ? 1 : 0));
+  if (m.ingredients?.length) { // les recettes qui utilisent tous les ingrédients demandés d'abord
+    const text = foldChars(recipeText(r));
+    const found = m.ingredients.filter((x) => { const k = foldChars(x).replace(/(s|x)$/, ""); return k && text.includes(k); }).length;
+    s += found === m.ingredients.length ? -3 : found ? -1 : 3;
+  }
   if (m.style === "simple") { if (isEasy(r)) s -= 2; if (r.ingredients.length > 10) s += 2; }
   if (m.style === "chef" && (r.chef || res.chefSite)) s -= 4;
   if (m.style === "healthy") { if (r.calories && r.calories > 650) s += 3; if (/\b(crème|beurre|lardons|fromage râpé|frit|friture)\b/i.test(recipeText(r))) s += 1.5; }
@@ -3279,7 +3306,7 @@ function faimSummary(m) {
   const style = FAIM_STYLES.find((s) => s.id === m.style);
   const range = faimRange(m);
   const time = !m.times.length ? "" : range.max >= 100000 ? `plus de ${formatMinutes(range.min)}` : range.min ? `${formatMinutes(range.min)} à ${formatMinutes(range.max)}` : `moins de ${formatMinutes(range.max)}`;
-  return [style && `${style.emoji} ${style.label}`, m.ingredient, FAIM_TYPES.find(([id]) => id && id === m.type)?.[1], time,
+  return [style && `${style.emoji} ${style.label}`, (m.ingredients || []).join(" + "), FAIM_TYPES.find(([id]) => id && id === m.type)?.[1], time,
     ...FAIM_DIETS.filter(([id]) => m.diet.includes(id)).map(([, l]) => l), m.people && `${m.people} pers.`].filter(Boolean).join(" · ");
 }
 
@@ -3293,7 +3320,9 @@ function runFaim(m) {
 
 function openFaim() {
   const prev = store.get("zbc.faim", null);
-  const m = { style: "", ingredient: "", times: [], type: "plat", diet: [], people: prev?.people || 0, ...(prev ? { diet: prev.diet || [] } : {}) };
+  const cur = state.search.mood;
+  const m = { style: cur?.style || "", ingredients: [...(cur?.ingredients || [])], times: [...(cur?.times || [])], type: cur?.type ?? "plat",
+    diet: [...(cur?.diet || prev?.diet || [])], people: cur?.people ?? prev?.people ?? 0 };
   let step = 0;
   const body = h("div", { class: "faim-body" });
   const dots = h("div", { class: "faim-dots", "aria-hidden": "true" });
@@ -3310,17 +3339,35 @@ function openFaim() {
       h("div", { class: "faim-tiles" }, FAIM_STYLES.map((s) => tile(m.style === s.id, () => { m.style = s.id; goStep(1); },
         h("span", { class: "faim-emoji" }, s.emoji), h("strong", {}, s.label), h("small", {}, s.sub)))),
       h("button", { type: "button", class: "btn faim-surprise", onclick: () => {
-        Object.assign(m, { style: pick(FAIM_STYLES).id, ingredient: "", times: [], type: "plat" });
+        Object.assign(m, { style: pick(FAIM_STYLES).id, ingredients: [], times: [], type: "plat" });
         finish();
       } }, "🎲 Surprends-moi")],
     () => {
-      const input = h("input", { class: "input", type: "text", placeholder: "Ex. poulet, courgette, chocolat…", value: m.ingredient, enterkeyhint: "next",
-        oninput: (e) => { m.ingredient = e.target.value; }, onkeydown: (e) => { if (e.key === "Enter") { e.preventDefault(); goStep(2); } } });
+      const MAX = 3;
+      const has = (x) => m.ingredients.some((y) => foldChars(y) === foldChars(x));
+      const add = (raw) => {
+        for (const x of String(raw).split(/[,;+]|\bet\b/).map((t) => t.trim()).filter(Boolean)) {
+          if (m.ingredients.length >= MAX) { toast("3 ingrédients maximum"); break; }
+          if (!has(x)) m.ingredients.push(x.slice(0, 30));
+        }
+        draw();
+        body.querySelector(".faim-ing-input")?.focus();
+      };
+      const remove = (x) => { m.ingredients = m.ingredients.filter((y) => y !== x); draw(); };
+      const full = m.ingredients.length >= MAX;
+      const input = h("input", { class: "input faim-ing-input", type: "text", enterkeyhint: "done", disabled: full,
+        placeholder: full ? "3 ingrédients maximum" : m.ingredients.length ? "Un autre ? (facultatif)" : "Ex. champignons, œuf…",
+        onkeydown: (e) => { if (e.key === "Enter") { e.preventDefault(); if (e.target.value.trim()) add(e.target.value); else goStep(2); } } });
       const season = seasonNow().filter((p) => (m.type === "dessert" ? FRUITS.has(p) : true)).slice(0, 8);
-      const common = m.style === "saison" ? [] : ["poulet", "bœuf", "saumon", "crevettes", "œufs", "pâtes", "riz", "lentilles", "fromage", "chocolat"];
+      const common = m.style === "saison" ? [] : ["poulet", "bœuf", "saumon", "crevettes", "œufs", "champignons", "pâtes", "riz", "fromage", "chocolat"];
       const chips = (title, list) => list.length ? [h("span", { class: "field-label" }, title), h("div", { class: "filters faim-chips" }, list.map((x) =>
-        chipBtn(m.ingredient === x, x, () => { m.ingredient = m.ingredient === x ? "" : x; input.value = m.ingredient; draw(); })))] : [];
-      return [h("p", { class: "faim-q" }, "Un ingrédient principal\u00a0?", h("small", {}, " facultatif")), input,
+        h("button", { type: "button", class: "filter", "aria-pressed": String(has(x)), disabled: full && !has(x),
+          onclick: () => (has(x) ? remove(m.ingredients.find((y) => foldChars(y) === foldChars(x))) : add(x)) }, x)))] : [];
+      return [h("p", { class: "faim-q" }, "Des ingrédients à utiliser\u00a0?", h("small", {}, " jusqu'à 3, facultatif")),
+        m.ingredients.length ? h("div", { class: "faim-picked" }, m.ingredients.map((x) =>
+          h("button", { type: "button", class: "faim-pill", "aria-label": `Retirer ${x}`, onclick: () => remove(x) }, x, icon("close")))) : null,
+        full ? h("p", { class: "site-help" }, "C'est le maximum : touchez un ingrédient pour le retirer.")
+          : h("div", { class: "url-row" }, input, h("button", { type: "button", class: "btn", onclick: () => { if (input.value.trim()) add(input.value); else input.focus(); } }, "Ajouter")),
         ...chips("De saison en ce moment", season), ...chips("Idées", common)];
     },
     () => [h("p", { class: "faim-q" }, "Combien de temps voulez-vous y consacrer\u00a0?"),
@@ -3332,7 +3379,7 @@ function openFaim() {
         if (idx.length > 1) m.times = FAIM_TIMES.slice(Math.min(...idx), Math.max(...idx) + 1).map((x) => x.id);
         draw();
       }, h("strong", {}, t.label)))),
-      h("p", { class: "site-help" }, m.times.length ? `Fourchette : ${faimSummary({ ...m, style: "", ingredient: "", type: "", diet: [], people: 0 })}` : "Sans choix : peu importe la durée.")],
+      h("p", { class: "site-help" }, m.times.length ? `Fourchette : ${faimSummary({ ...m, style: "", ingredients: [], type: "", diet: [], people: 0 })}` : "Sans choix : peu importe la durée.")],
     () => [h("p", { class: "faim-q" }, "Encore quelques précisions\u00a0?", h("small", {}, " facultatif")),
       h("span", { class: "field-label" }, "Type de plat"),
       h("div", { class: "filters faim-chips" }, FAIM_TYPES.map(([id, label]) => chipBtn(m.type === id, label, () => { m.type = id; draw(); }))),
@@ -3351,19 +3398,23 @@ function openFaim() {
     dots.replaceChildren(...steps.map((_, i) => h("span", { class: i === step ? "on" : i < step ? "done" : "" })));
     back.style.visibility = step === 0 ? "hidden" : "visible";
     next.hidden = step === 0;
-    next.textContent = step === steps.length - 1 ? "C'est parti\u00a0!" : step === 1 && !m.ingredient.trim() ? "Peu importe" : "Suivant";
+    next.textContent = step === steps.length - 1 ? "C'est parti\u00a0!" : step === 1 && !m.ingredients.length ? "Peu importe" : "Suivant";
   }
   function goStep(i) {
     if (i < 0) return;
+    const typed = step === 1 && body.querySelector(".faim-ing-input")?.value.trim();
+    if (typed && m.ingredients.length < 3) m.ingredients.push(typed.slice(0, 30));
     if (i >= steps.length) return finish();
     step = i; draw(); body.scrollTop = 0;
   }
   function finish() {
     if (!m.style) m.style = "simple";
+    const pending = body.querySelector(".faim-ing-input")?.value.trim();
+    if (pending && m.ingredients.length < 3) m.ingredients.push(pending.slice(0, 30));
     store.set("zbc.faim", { diet: m.diet, people: m.people });
     dlg.close();
     if (location.hash !== "#/" && location.hash !== "") go("#/");
-    runFaim({ ...m, ingredient: m.ingredient.trim() });
+    runFaim({ ...m, ingredient: m.ingredients.join(" ") });
   }
   dlg.addEventListener("close", () => dlg.remove());
   document.body.append(dlg);
