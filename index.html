@@ -690,7 +690,7 @@ window.applyTheme = function (name) {
     <div class="group" id="ai-group" hidden>
       <label class="field-label" for="set-ai-key">IA personnelle <small class="muted-inline">facultatif</small></label>
       <p>Avec votre propre clé Gemini (gratuite chez Google), Let Us Cook lit aussi les pages de recettes difficiles et les recettes manuscrites en photo, et lit les étapes avec une voix naturelle.</p>
-      <input class="input" id="set-ai-key" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Votre clé Gemini (commence par AIza…)">
+      <input class="input" id="set-ai-key" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Votre clé Gemini (AIza… ou AQ.…)">
       <label class="ai-consent"><input type="checkbox" id="set-ai-consent">
         <span>J'accepte que, quand j'utilise l'IA, le texte des pages de recettes, mes photos de recettes et les étapes à lire soient envoyés à <strong>Google (Gemini)</strong> avec ma clé, via le relais Let Us Cook qui ne les conserve pas.</span></label>
       <div class="url-row">
@@ -722,14 +722,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.24.0"></script>
-<script src="extracteur.js?v=2.24.0"></script>
+<script src="config.js?v=2.24.1"></script>
+<script src="extracteur.js?v=2.24.1"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.24.0";
+const APP_VERSION = "2.24.1";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);

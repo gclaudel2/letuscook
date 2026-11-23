@@ -151,7 +151,7 @@ const AI_ROUTES = new Set(["/ia", "/photo", "/voix", "/cle"]);
  */
 function userAiEnv(request, env) {
   const key = (request.headers.get("x-user-ai-key") || "").trim();
-  if (!/^[A-Za-z0-9_\-]{20,100}$/.test(key)) {
+  if (!/^[A-Za-z0-9_.\-]{20,200}$/.test(key)) { // anciennes clés « AIza… » et nouvelles « AQ.… »
     throw new RelayError("AI_DISABLED", "Pour utiliser l'IA, ajoutez votre clé Gemini personnelle dans les Réglages de l'app.", 403);
   }
   const own = { ...env };
@@ -168,7 +168,7 @@ async function handleKeyCheck(env) {
     });
   } catch { throw new RelayError("LLM_FAILED", "Google ne répond pas, réessayez dans un instant.", 502); }
   if (res.ok) return { ok: true };
-  if (res.status === 400 || res.status === 401 || res.status === 403) throw new RelayError("INVALID_KEY", "Clé refusée par Google : vérifiez-la (elle commence en général par « AIza »).", 400);
+  if (res.status === 400 || res.status === 401 || res.status === 403) throw new RelayError("INVALID_KEY", "Clé refusée par Google : vérifiez-la (elle commence par « AIza » ou « AQ. »).", 400);
   if (res.status === 429) return { ok: true, note: "Clé valide, mais quota atteint pour le moment." };
   throw new RelayError("LLM_FAILED", `Google a répondu ${res.status}.`, 502);
 }
