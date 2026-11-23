@@ -589,6 +589,10 @@
 
   /* ── Recherche ─────────────────────────────────── */
   .hero.compact { padding: 10px 0 14px; }
+  .bar-hero { flex: 1; min-width: 0; padding: 6px 0 !important; }
+  .bar-hero .hero-row .icon-btn { margin-right: -10px; }
+  .hero.tagline-only { padding: 4px 0 18px; }
+  .hero.tagline-only .tagline { margin: 0; }
   .hero.compact .brand { font-size: 30px; }
   .hero.compact .brand br { display: none; }
   .hero.compact .brand .accent { margin-left: 0.25em; }
@@ -898,14 +902,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.31.1"></script>
-<script src="extracteur.js?v=2.31.1"></script>
+<script src="config.js?v=2.31.2"></script>
+<script src="extracteur.js?v=2.31.2"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.31.1";
+const APP_VERSION = "2.31.2";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1969,8 +1973,8 @@ function route() {
 
 function setView(toolbarItems, content) {
   $("#tabbar").hidden = true; document.body.classList.remove("has-tabbar"); // l'accueil la remet
-  $("#toolbar").replaceChildren(...toolbarItems);
-  $("#app").replaceChildren(...content);
+  $("#toolbar").replaceChildren(...toolbarItems.filter((x) => x != null && x !== false));
+  $("#app").replaceChildren(...content.filter((x) => x != null && x !== false));
   window.scrollTo(0, 0);
 }
 
@@ -2031,19 +2035,19 @@ function settingsButton() {
 }
 
 function renderHome() {
-  const toolbar = []; // pas de barre en haut de l'accueil : l'engrenage est à côté du titre
+  // Bandeau collé en haut : « Let Us Cook » et les réglages restent visibles quand on fait défiler
+  const toolbar = [h("div", { class: "hero compact bar-hero" },
+    h("div", { class: "hero-row" },
+      h("h1", { class: "brand" },
+        h("a", { href: "#/", class: "brand-link", "aria-label": "Let Us Cook : retour à l'accueil", onclick: (e) => { e.preventDefault(); resetHome(); } },
+          h("img", { class: "brand-icon", src: "icons/icon-192.png?v=2", alt: "", width: "192", height: "192" }),
+          ...brandParts())),
+      settingsButton()))];
 
   const compact = state.tab === "recherche" && (state.search.results.length > 0 || state.search.loading);
   const content = [
-    h("section", { class: compact ? "hero compact" : "hero" },
-      h("div", { class: "hero-row" },
-        h("h1", { class: "brand" },
-          h("a", { href: "#/", class: "brand-link", "aria-label": "Let Us Cook : retour à l'accueil", onclick: (e) => { e.preventDefault(); resetHome(); } },
-            h("img", { class: "brand-icon", src: "icons/icon-192.png?v=2", alt: "", width: "192", height: "192" }),
-            ...brandParts())),
-        settingsButton()),
-      h("p", { class: "tagline" }, THEME_TAGLINES[currentTheme()] || THEME_TAGLINES.braise),
-    ),
+    !compact && state.tab === "recherche" && h("section", { class: "hero tagline-only" },
+      h("p", { class: "tagline" }, THEME_TAGLINES[currentTheme()] || THEME_TAGLINES.braise)),
     state.tab === "carnet" ? renderCarnet() : state.tab === "extraire" ? renderExtractPanel() : state.tab === "chefs" ? renderChefsPanel() : renderSearchPanel(),
   ];
   setView(toolbar, content);
