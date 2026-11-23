@@ -861,14 +861,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.30.2"></script>
-<script src="extracteur.js?v=2.30.2"></script>
+<script src="config.js?v=2.30.3"></script>
+<script src="extracteur.js?v=2.30.3"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.30.2";
+const APP_VERSION = "2.30.3";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -2715,7 +2715,7 @@ function rememberView(recipe, saved) {
     savedId: saved ? recipe.id : undefined, at: Date.now(), recipe: copy,
   };
   const list = store.get(RECENT_VIEWS, []).filter((x) => x.key !== key);
-  store.set(RECENT_VIEWS, [entry, ...list].slice(0, 10));
+  store.set(RECENT_VIEWS, [entry, ...list].slice(0, 5));
 }
 
 function openRecentView(v) {
@@ -2748,7 +2748,7 @@ function openRecentView(v) {
 
 function renderHistory() {
   const searches = store.get(RECENT_SEARCHES, []);
-  const views = store.get(RECENT_VIEWS, []);
+  const views = store.get(RECENT_VIEWS, []).slice(0, 5);
   const out = [];
   if (searches.length) {
     out.push(h("div", { class: "history-head" }, h("h3", {}, "Recherches récentes"),
