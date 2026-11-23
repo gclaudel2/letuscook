@@ -711,7 +711,7 @@
     width: min(560px, calc(100% - 24px)); max-height: calc(100% - 40px); padding: 22px;
     border: 0; border-radius: 22px; background: var(--bg); color: var(--ink);
   }
-  dialog { overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  dialog { overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
   .muted-inline { font-weight: 500; color: var(--muted); font-size: 14px; margin-left: 6px; }
   .sites { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); overflow: hidden; }
   .site { display: flex; align-items: center; gap: 12px; padding: 10px 12px; }
@@ -861,14 +861,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.30.1"></script>
-<script src="extracteur.js?v=2.30.1"></script>
+<script src="config.js?v=2.30.2"></script>
+<script src="extracteur.js?v=2.30.2"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.30.1";
+const APP_VERSION = "2.30.2";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -3180,6 +3180,33 @@ function askFreeTimer(recipe) {
   Timers.start({ ms, name: "Minuteur", recipeId: recipe?.id, recipeTitle: recipe?.title });
 }
 
+/* ════════════ Fenêtres : la page derrière ne défile pas ════════════ */
+// Sur iPhone, overflow:hidden ne suffit pas : on fige la page (position fixe) le temps qu'une fenêtre est ouverte.
+const ScrollLock = {
+  count: 0, y: 0,
+  lock() {
+    if (this.count++) return;
+    this.y = window.scrollY;
+    Object.assign(document.body.style, { position: "fixed", top: `-${this.y}px`, left: "0", right: "0", width: "100%" });
+  },
+  unlock() {
+    if (!this.count || --this.count) return;
+    Object.assign(document.body.style, { position: "", top: "", left: "", right: "", width: "" });
+    window.scrollTo(0, this.y);
+  },
+};
+(() => {
+  const show = HTMLDialogElement.prototype.showModal;
+  HTMLDialogElement.prototype.showModal = function (...args) {
+    const wasOpen = this.open;
+    show.apply(this, args);
+    if (wasOpen || this.__locked) return;
+    this.__locked = true;
+    ScrollLock.lock();
+    this.addEventListener("close", () => { if (this.__locked) { this.__locked = false; ScrollLock.unlock(); } }, { once: true });
+  };
+})();
+
 /* ════════════ « Donne-moi faim » : on choisit la recette ensemble ════════════ */
 /*
  * Quelques questions (envie, ingrédient, temps, options), puis une vraie recherche sur les sites de recettes
@@ -3224,6 +3251,13 @@ const FAIM_IDEAS = { // quand il n'y a pas d'ingrédient principal
   reconfort: { plat: ["gratin", "lasagnes", "hachis parmentier", "risotto", "tartiflette", "blanquette", "bœuf bourguignon", "mac and cheese", "pot-au-feu", "chili"], entree: ["soupe à l'oignon", "velouté", "croque"], dessert: ["crumble", "brownie", "riz au lait", "pain perdu", "fondant chocolat"], apero: ["gougères", "feuilletés", "fondue"] },
   healthy: { plat: ["buddha bowl", "curry de légumes", "poisson vapeur", "salade complète", "wok de légumes", "lentilles", "poke bowl", "légumes rôtis"], entree: ["soupe de légumes", "salade", "gaspacho", "tartare de légumes"], dessert: ["salade de fruits", "compote", "panna cotta légère", "fruits rôtis"], apero: ["houmous", "crudités", "guacamole"] },
   chef: { plat: ["saint-jacques", "risotto", "volaille", "agneau", "bar", "filet de bœuf", "canard", "homard"], entree: ["carpaccio", "velouté", "tartare", "foie gras"], dessert: ["tarte", "soufflé", "entremets", "millefeuille", "tarte au citron"], apero: ["bouchées", "tartare", "gougères"] },
+};
+const FAIM_SUGGEST = { // ingrédients proposés selon l'envie choisie
+  "": ["poulet", "bœuf", "saumon", "crevettes", "œufs", "champignons", "pâtes", "riz", "fromage", "chocolat"],
+  simple: ["œufs", "pâtes", "riz", "poulet", "jambon", "thon", "pommes de terre", "tomates", "courgette", "fromage"],
+  reconfort: ["pommes de terre", "fromage", "pâtes", "bœuf", "poulet", "lardons", "champignons", "saucisse", "crème", "chocolat"],
+  healthy: ["saumon", "lentilles", "quinoa", "pois chiches", "avocat", "brocoli", "épinards", "patate douce", "tofu", "poulet"],
+  chef: ["saint-jacques", "bar", "canard", "agneau", "veau", "homard", "langoustines", "foie gras", "truffe", "chocolat"],
 };
 const FAIM_STYLE_WORD = { simple: "facile", reconfort: "", healthy: "léger", chef: "", saison: "" };
 const RE = {
@@ -3366,8 +3400,10 @@ function openFaim() {
       const input = h("input", { class: "input faim-ing-input", type: "text", enterkeyhint: "done", disabled: full,
         placeholder: full ? "3 ingrédients maximum" : m.ingredients.length ? "Un autre ?" : "Ex. champignons, œuf…",
         onkeydown: (e) => { if (e.key === "Enter") { e.preventDefault(); if (e.target.value.trim()) add(e.target.value, true); else e.target.blur(); } } });
-      const season = seasonNow().filter((p) => (m.type === "dessert" ? FRUITS.has(p) : true)).slice(0, 8);
-      const common = (m.style === "saison" ? [] : ["poulet", "bœuf", "saumon", "crevettes", "œufs", "champignons", "pâtes", "riz", "fromage", "chocolat"]).filter((x) => !season.includes(x));
+      const style = FAIM_STYLES.find((x) => x.id === m.style);
+      const allSeason = seasonNow().filter((p) => (m.type === "dessert" ? FRUITS.has(p) : true));
+      const season = allSeason.slice(0, m.style === "saison" ? 12 : 5);
+      const common = (m.style === "saison" ? [] : FAIM_SUGGEST[m.style] || FAIM_SUGGEST[""]).filter((x) => !season.includes(x));
       const chips = (title, list) => list.length ? [h("span", { class: "field-label" }, title), h("div", { class: "filters faim-chips" }, list.map((x) =>
         h("button", { type: "button", class: "filter", "aria-pressed": String(has(x)), disabled: full && !has(x),
           onclick: () => (has(x) ? remove(m.ingredients.find((y) => foldChars(y) === foldChars(x))) : add(x)) }, x)))] : [];
@@ -3376,7 +3412,8 @@ function openFaim() {
           h("button", { type: "button", class: "faim-pill", "aria-label": `Retirer ${x}`, onclick: () => remove(x) }, x, icon("close")))) : null,
         full ? h("p", { class: "site-help" }, "C'est le maximum : touchez un ingrédient pour le retirer.")
           : h("div", { class: "url-row" }, input, h("button", { type: "button", class: "btn", onclick: () => { if (input.value.trim()) add(input.value, true); else input.focus(); } }, "Ajouter")),
-        ...chips("De saison en ce moment", season), ...chips("Idées", common)];
+        ...(m.style === "saison" ? chips("Les produits du moment", season)
+          : [...chips(style ? `Idées « ${style.label} »` : "Idées", common), ...chips("De saison en ce moment", season)])];
     },
     () => [h("p", { class: "faim-q" }, "Combien de temps voulez-vous y consacrer\u00a0?"),
       h("p", { class: "site-help" }, "Choisissez une ou plusieurs durées qui se suivent (ex. 15 à 30 min et 30 min à 1 h)."),
@@ -3402,7 +3439,7 @@ function openFaim() {
         h("button", { type: "button", class: "round-btn", "aria-label": "Plus", onclick: () => { m.people = Math.min(20, (m.people || 0) + 1); draw(); } }, "+"))],
   ];
   function draw() {
-    body.replaceChildren(...steps[step]());
+    body.replaceChildren(...steps[step]().flat().filter((x) => x != null && x !== false));
     dots.replaceChildren(...steps.map((_, i) => h("span", { class: i === step ? "on" : i < step ? "done" : "" })));
     back.hidden = step === 0;
     next.textContent = step === steps.length - 1 ? "C'est parti\u00a0!" : "Suivant";
