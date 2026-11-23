@@ -1,4 +1,4 @@
-// letuscook — app iPhone
+// Let Us Cook — app iPhone
 // Remplacez TOUT le contenu du fichier « ContentView.swift » de votre projet Xcode par ce fichier.
 //
 // L'app affiche letuscook (le site GitHub Pages) et ajoute ce qu'un site web ne peut pas faire :
@@ -12,6 +12,8 @@ import UserNotifications
 
 let appURL = URL(string: "https://gclaudel2.github.io/letuscook/")!
 let appHost = "gclaudel2.github.io"
+// Clé de l'app pour le relais Cloudflare (secret APP_KEY) : sans code d'accès, et le relais refuse l'IA
+let relayAppKey = "CLE_APP_KEY_DU_RELAIS" // la vraie clé est seulement dans le projet sur le Mac (secret APP_KEY sur Cloudflare)
 let slate = UIColor(red: 0x1F / 255, green: 0x2A / 255, blue: 0x26 / 255, alpha: 1)
 
 struct ContentView: View {
@@ -31,6 +33,10 @@ struct WebView: UIViewRepresentable {
         config.mediaTypesRequiringUserActionForPlayback = []   // lecture à voix haute du mode cuisine
         config.applicationNameForUserAgent = "letuscook-ios"
         config.userContentController.add(context.coordinator, name: "letuscook")
+        // Version App Store : clé du relais (remplace le code d'accès) et aucune fonction IA
+        config.userContentController.addUserScript(WKUserScript(
+            source: "window.LUC_APP = Object.freeze({ key: \"\(relayAppKey)\", noAI: true, store: true });",
+            injectionTime: .atDocumentStart, forMainFrameOnly: true))
 
         let web = WKWebView(frame: .zero, configuration: config)
         web.navigationDelegate = context.coordinator
@@ -39,7 +45,9 @@ struct WebView: UIViewRepresentable {
         web.scrollView.contentInsetAdjustmentBehavior = .never  // la page gère elle-même l'encoche
         web.isOpaque = false
         web.backgroundColor = slate
+        #if DEBUG
         web.isInspectable = true                                // débogage depuis Safari sur le Mac
+        #endif
         context.coordinator.web = web
         // Toujours la dernière version publiée (sans ça, la page peut rester 10 min en cache)
         web.load(URLRequest(url: appURL, cachePolicy: .reloadRevalidatingCacheData))
@@ -137,29 +145,33 @@ final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate,
 
 // ── Minuteurs → notifications locales programmées à l'heure de fin ──
 enum TimerNotifications {
-    @MainActor
     static func sync(_ list: [[String: Any]]) {
-        Task {
-            let center = UNUserNotificationCenter.current()
-            let wanted = Set(list.compactMap { $0["id"] as? String }.map { "timer-\($0)" })
-            let pending = await center.pendingNotificationRequests().map(\.identifier)
-            center.removePendingNotificationRequests(withIdentifiers: pending.filter { $0.hasPrefix("timer-") && !wanted.contains($0) })
-            guard !list.isEmpty else { return }
+        // On extrait les valeurs tout de suite (types simples), puis on travaille avec les callbacks du centre de notifications
+        let timers: [(id: String, endAt: Double, name: String, recipe: String)] = list.compactMap { t in
+            guard let id = t["id"] as? String, let endAt = (t["endAt"] as? NSNumber)?.doubleValue else { return nil }
+            return (id, endAt, t["name"] as? String ?? "Minuteur", t["recipe"] as? String ?? "")
+        }
+        let center = UNUserNotificationCenter.current()
+        let wanted = Set(timers.map { "timer-\($0.id)" })
+        center.getPendingNotificationRequests { pending in
+            let stale = pending.map(\.identifier).filter { $0.hasPrefix("timer-") && !wanted.contains($0) }
+            center.removePendingNotificationRequests(withIdentifiers: stale)
+            guard !timers.isEmpty else { return }
             // La première fois, l'iPhone demande l'autorisation d'envoyer des notifications
-            guard (try? await center.requestAuthorization(options: [.alert, .sound])) == true else { return }
-            let now = Date().timeIntervalSince1970
-            for timer in list {
-                guard let id = timer["id"] as? String,
-                      let endAt = (timer["endAt"] as? NSNumber)?.doubleValue else { continue }
-                let delay = endAt / 1000 - now
-                if delay < 1 { continue }
-                let content = UNMutableNotificationContent()
-                content.title = "⏰ \(timer["name"] as? String ?? "Minuteur") : c'est prêt !"
-                if let recipe = timer["recipe"] as? String, !recipe.isEmpty { content.body = recipe }
-                content.sound = .default
-                let trigger = UNTimeIntervalNotificationTrigger(timeInterval: delay, repeats: false)
-                // même identifiant = la notification est remplacée (pause, +1 min…)
-                try? await center.add(UNNotificationRequest(identifier: "timer-\(id)", content: content, trigger: trigger))
+            center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+                guard granted else { return }
+                let now = Date().timeIntervalSince1970
+                for t in timers {
+                    let delay = t.endAt / 1000 - now
+                    if delay < 1 { continue }
+                    let content = UNMutableNotificationContent()
+                    content.title = "⏰ \(t.name) : c'est prêt !"
+                    if !t.recipe.isEmpty { content.body = t.recipe }
+                    content.sound = .default
+                    let trigger = UNTimeIntervalNotificationTrigger(timeInterval: delay, repeats: false)
+                    // même identifiant = la notification est remplacée (pause, +1 min…)
+                    center.add(UNNotificationRequest(identifier: "timer-\(t.id)", content: content, trigger: trigger))
+                }
             }
         }
     }
