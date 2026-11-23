@@ -609,6 +609,38 @@
   .filter { height: 36px; padding: 0 14px; border-radius: var(--pill); border: 1.5px solid var(--line); background: var(--surface); font-size: 14px; font-weight: 650; }
   .filter[aria-pressed="true"] { background: var(--chip-on); border-color: var(--chip-on); color: var(--chip-on-ink); }
   .results { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+  .result.big { flex-direction: column; gap: 0; padding: 0; overflow: hidden; }
+  .result.big .r-thumb { width: 100%; height: auto; aspect-ratio: 16 / 9; border-radius: 0; }
+  .result.big .r-thumb .initial { font-size: 48px; }
+  .result.big .r-thumb:not(:has(img)) { aspect-ratio: 16 / 5; } /* pas de photo : bandeau bas, pas un grand vide */
+  #ai-group .url-row .btn { padding: 0 10px; white-space: nowrap; font-size: 16px; }
+  .result.big .r-body { padding: 12px 14px 14px; gap: 6px; }
+  .result.big .r-name { font-size: 19px; line-height: 1.25; }
+  .result.big .r-meta { font-size: 14px; gap: 4px 12px; }
+  .result.big .r-meta .fact svg { width: 16px; height: 16px; }
+  @media (min-width: 720px) { #results { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; } }
+  .see-more { display: block; margin: 14px auto 0; }
+  .start-cook { margin-top: 18px; gap: 8px; }
+  .tabbar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; display: flex;
+    padding: 6px max(8px, env(safe-area-inset-left)) calc(6px + var(--safe-bottom));
+    background: color-mix(in srgb, var(--surface) 94%, transparent);
+    -webkit-backdrop-filter: saturate(1.4) blur(14px); backdrop-filter: saturate(1.4) blur(14px);
+    border-top: 1px solid var(--line);
+  }
+  .tabbar[hidden] { display: none; }
+  .tabbar-btn { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 0 2px; border: 0; background: transparent; color: var(--muted); font: 650 12px/1 var(--rounded); }
+  .tabbar-btn[aria-current="page"] { color: var(--accent); }
+  .tabbar-icon { position: relative; display: grid; place-items: center; width: 52px; height: 30px; border-radius: 999px; }
+  .tabbar-btn[aria-current="page"] .tabbar-icon { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+  .tabbar-icon svg { width: 23px; height: 23px; }
+  .tabbar-count { position: absolute; top: -3px; right: 4px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font: 750 11px/18px var(--rounded); text-align: center; }
+  body.has-tabbar { padding-bottom: calc(74px + var(--safe-bottom)); }
+  body.has-tabbar .timers { bottom: calc(80px + var(--safe-bottom)); }
+  body.has-tabbar .toast { bottom: calc(86px + var(--safe-bottom) + var(--timers-h, 0px)); }
+  details.advanced > summary { cursor: pointer; font-weight: 750; font-size: 17px; padding: 6px 0; }
+  details.advanced[open] > summary { margin-bottom: 10px; }
+  details.advanced > .group { margin-top: 18px; }
   .result {
     display: flex; gap: 12px; width: 100%; padding: 10px; text-align: left;
     border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);
@@ -773,6 +805,7 @@ window.applyTheme = function (name) {
 <body>
 <header class="topbar" id="topbar"><div class="wrap" id="toolbar"></div></header>
 <main class="wrap" id="app" tabindex="-1"></main>
+<nav class="tabbar" id="tabbar" aria-label="Sections" hidden></nav>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <dialog id="settings" aria-labelledby="settings-title">
@@ -789,29 +822,10 @@ window.applyTheme = function (name) {
       </select>
       <p>Le changement s'applique tout de suite.</p>
     </div>
-    <div class="group">
-      <label class="field-label" for="set-gesture">Sensibilité du geste de la main</label>
-      <select class="input" id="set-gesture">
-        <option value="faible">Faible : main très proche de l'écran</option>
-        <option value="normale">Normale</option>
-        <option value="forte">Forte : réagit aux gestes plus lointains</option>
-      </select>
-      <p>Si l'étape avance toute seule quand vous bougez dans la cuisine, choisissez « Faible ».</p>
-    </div>
-    <div class="group">
-      <span class="field-label">Recettes de chefs (index)</span>
-      <div id="chef-index"></div>
-      <p>Ces sites n'ont pas de moteur de recherche : l'appli parcourt leurs recettes une fois par semaine et les garde sur cet appareil, pour les retrouver instantanément.</p>
-    </div>
     <div class="group relay-group">
       <label class="field-label" for="set-worker">Adresse du relais</label>
       <input class="input" id="set-worker" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://zbc-relais.….workers.dev">
       <p>Laissez vide pour utiliser le relais prévu par l'appli (affiché en grisé). À remplir seulement pour en utiliser un autre.</p>
-    </div>
-    <div class="group relay-group">
-      <label class="field-label" for="set-code">Code d'accès</label>
-      <input class="input" id="set-code" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Le code ACCESS_CODE du relais">
-      <p>Laissez vide si le relais n'exige pas de code, ou si le code est déjà prévu par l'appli.</p>
     </div>
     <div class="group" id="ai-group" hidden>
       <label class="field-label" for="set-ai-key">IA personnelle <small class="muted-inline">facultatif</small></label>
@@ -840,11 +854,6 @@ window.applyTheme = function (name) {
       </details>
     </div>
     <div class="group">
-      <span class="field-label">Sites de recherche <small id="sites-count" class="muted-inline"></small></span>
-      <div id="sites-manager"></div>
-      <p>Les sites désactivés ne sont pas interrogés. Ces choix sont enregistrés sur cet appareil.</p>
-    </div>
-    <div class="group">
       <span class="field-label">Mon carnet</span>
       <div class="url-row">
         <button type="button" class="btn" id="btn-export" style="flex:1">Exporter</button>
@@ -853,6 +862,33 @@ window.applyTheme = function (name) {
       </div>
       <p id="storage-info">Vos recettes restent sur cet appareil. Exportez-les de temps en temps pour en garder une copie.</p>
     </div>
+    <details class="group advanced" id="settings-advanced">
+      <summary>Réglages avancés <small class="muted-inline">sites, recettes de chefs, geste, relais</small></summary>
+    <div class="group">
+      <span class="field-label">Sites de recherche <small id="sites-count" class="muted-inline"></small></span>
+      <div id="sites-manager"></div>
+      <p>Les sites désactivés ne sont pas interrogés. Ces choix sont enregistrés sur cet appareil.</p>
+    </div>
+    <div class="group">
+      <span class="field-label">Recettes de chefs (index)</span>
+      <div id="chef-index"></div>
+      <p>Ces sites n'ont pas de moteur de recherche : l'appli parcourt leurs recettes une fois par semaine et les garde sur cet appareil, pour les retrouver instantanément.</p>
+    </div>
+    <div class="group">
+      <label class="field-label" for="set-gesture">Sensibilité du geste de la main</label>
+      <select class="input" id="set-gesture">
+        <option value="faible">Faible : main très proche de l'écran</option>
+        <option value="normale">Normale</option>
+        <option value="forte">Forte : réagit aux gestes plus lointains</option>
+      </select>
+      <p>Si l'étape avance toute seule quand vous bougez dans la cuisine, choisissez « Faible ».</p>
+    </div>
+    <div class="group relay-group">
+      <label class="field-label" for="set-code">Code d'accès</label>
+      <input class="input" id="set-code" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Le code ACCESS_CODE du relais">
+      <p>Laissez vide si le relais n'exige pas de code, ou si le code est déjà prévu par l'appli.</p>
+    </div>
+    </details>
     <p class="version" id="settings-version"></p>
     <div class="actions">
       <button class="btn ghost" value="cancel" formnovalidate>Annuler</button>
@@ -861,14 +897,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.30.3"></script>
-<script src="extracteur.js?v=2.30.3"></script>
+<script src="config.js?v=2.31.0"></script>
+<script src="extracteur.js?v=2.31.0"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.30.3";
+const APP_VERSION = "2.31.0";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1931,6 +1967,7 @@ function route() {
 }
 
 function setView(toolbarItems, content) {
+  $("#tabbar").hidden = true; document.body.classList.remove("has-tabbar"); // l'accueil la remet
   $("#toolbar").replaceChildren(...toolbarItems);
   $("#app").replaceChildren(...content);
   window.scrollTo(0, 0);
@@ -1995,14 +2032,6 @@ function settingsButton() {
 function renderHome() {
   const toolbar = []; // pas de barre en haut de l'accueil : l'engrenage est à côté du titre
 
-  const tabs = h("div", { class: "tabs", role: "tablist", "aria-label": "Sections" },
-    h("button", { class: "tab", role: "tab", "aria-selected": String(state.tab === "recherche"), onclick: () => go("#/") }, "Chercher"),
-    h("button", { class: "tab", role: "tab", "aria-selected": String(state.tab === "extraire"), onclick: () => go("#/lien") }, "Analyser"),
-    h("button", { class: "tab", role: "tab", "aria-selected": String(state.tab === "chefs"), onclick: () => go("#/chefs") }, "Explorer"),
-    h("button", { class: "tab", role: "tab", "aria-selected": String(state.tab === "carnet"), onclick: () => go("#/carnet") },
-      "Carnet ", h("span", { class: "count" }, state.recipes.length ? `· ${state.recipes.length}` : "")),
-  );
-
   const compact = state.tab === "recherche" && (state.search.results.length > 0 || state.search.loading);
   const content = [
     h("section", { class: compact ? "hero compact" : "hero" },
@@ -2014,10 +2043,27 @@ function renderHome() {
         settingsButton()),
       h("p", { class: "tagline" }, THEME_TAGLINES[currentTheme()] || THEME_TAGLINES.braise),
     ),
-    tabs,
     state.tab === "carnet" ? renderCarnet() : state.tab === "extraire" ? renderExtractPanel() : state.tab === "chefs" ? renderChefsPanel() : renderSearchPanel(),
   ];
   setView(toolbar, content);
+  renderTabbar();
+}
+
+/** Onglets en bas de l'écran, à portée de pouce (seulement sur l'accueil, pas pendant une recette). */
+function renderTabbar() {
+  const bar = $("#tabbar");
+  const n = state.recipes.length;
+  const tab = (id, hash, iconName, label, extra) => h("button", {
+    type: "button", class: "tabbar-btn", "aria-current": state.tab === id ? "page" : "false",
+    onclick: () => { if (state.tab === id && id === "recherche") resetHome(); else go(hash); },
+  }, h("span", { class: "tabbar-icon" }, icon(iconName), extra), h("span", { class: "tabbar-label" }, label));
+  bar.replaceChildren(
+    tab("recherche", "#/", "search", "Chercher"),
+    tab("extraire", "#/lien", "camera", "Analyser"),
+    tab("chefs", "#/chefs", "star", "Explorer"),
+    tab("carnet", "#/carnet", "bookmark", "Carnet", n ? h("span", { class: "tabbar-count" }, n > 99 ? "99+" : String(n)) : null));
+  bar.hidden = false;
+  document.body.classList.add("has-tabbar");
 }
 
 function renderExtractPanel() {
@@ -2299,12 +2345,6 @@ function renderSearchPanel() {
   } else if (!S.loading) {
     parts.push(...renderHistory());
   }
-  if (!S.results.length && !S.loading && !S.error) {
-    const nSites = enabledSites().length, nChefs = ZBC.chefIndexCount();
-    parts.push(h("p", { class: "hint" }, nSites
-      ? `Recherche sur ${nSites} sites de cuisine${nChefs ? ` et ${nChefs} recettes de chefs` : ""} (liste dans les Réglages). Comparez temps, difficulté et notes d'un coup d'œil, puis ouvrez la recette en mode cuisine.`
-      : `Recherche dans ${nChefs} recettes de chefs (aucun site de recherche activé dans les Réglages).`));
-  }
 
   parts.push(h("p", { class: "version" }, `Let Us Cook · version ${APP_VERSION}${Native ? " · app iPhone" : ""}`));
   return h("section", { "aria-label": "Chercher une recette" }, parts);
@@ -2446,26 +2486,14 @@ function resultCard(res) {
   const title = (r && r.title) || res.title.split(/\s+[-|–—·»]\s+/)[0];
   const site = res.site || (r && r.siteName) || hostOf(res.url);
   const meta = [h("span", {}, site)];
-  if (r && r.rating) {
-    meta.push(h("span", { class: "rating" }, icon("star", true), `${String(r.rating.value).replace(".", ",")}${r.rating.count ? ` (${r.rating.count.toLocaleString("fr-FR")})` : ""}`));
-  }
 
-  let facts;
-  if (res.status === "ok" || (res.status === "partial" && r)) {
-    const t = totalMinutes(r);
-    facts = h("div", { class: "facts" },
-      t != null && fact("clock", formatMinutes(t), true),
-      r.servings && fact("users", `${r.servings} pers.`),
-      r.difficulty && fact("level", r.difficulty),
-      r.ingredients.length > 0 && fact("list", `${r.ingredients.length} ingr. · ${r.steps.length} étape${r.steps.length > 1 ? "s" : ""}`),
-      r.calories && h("span", { class: "fact" }, `${r.calories} kcal`),
-    );
-  } else if (res.status === "pending" || res.status === "loading") {
-    facts = h("div", { class: "facts loading" }, h("span", { class: "shimmer" }), h("span", { class: "shimmer short" }));
-  } else {
-    facts = h("div", { class: "facts muted" }, res.error || "Recette non détectée automatiquement");
-  }
-
+  // Carte simple : photo, titre, puis site · temps · note
+  const t = r ? totalMinutes(r) : null;
+  if (t != null) meta.push(h("span", { class: "fact" }, icon("clock"), h("b", {}, formatMinutes(t))));
+  if (r && r.rating) meta.push(h("span", { class: "rating" }, icon("star", true), String(r.rating.value).replace(".", ",")));
+  let facts = null;
+  if (res.status === "pending" || res.status === "loading") facts = h("div", { class: "facts loading" }, h("span", { class: "shimmer short" }));
+  else if (res.status === "fail" || (res.status === "partial" && !r)) facts = h("div", { class: "facts muted" }, res.error || "Recette non détectée automatiquement");
   const chefBadge = r && r.chef ? h("span", { class: "badge chef" }, `Chef ${r.chef}`) : res.chefSite && res.status === "ok" ? h("span", { class: "badge chef" }, "Recette de chef") : null;
   const pickBadge = state.search.mood && res.status === "ok" && visibleResults().find((x) => x.status === "ok") === res
     ? h("span", { class: "badge pick" }, "★ Notre idée") : null;
@@ -2475,7 +2503,7 @@ function resultCard(res) {
     : null;
 
   return h("li", {},
-    h("button", { class: `result ${res.status}`, type: "button", onclick: () => openResult(res) },
+    h("button", { class: `result big ${res.status}`, type: "button", onclick: () => openResult(res) },
       thumb,
       h("div", { class: "r-body" },
         h("div", { class: "r-name" }, title),
@@ -2747,8 +2775,10 @@ function openRecentView(v) {
 }
 
 function renderHistory() {
-  const searches = store.get(RECENT_SEARCHES, []);
-  const views = store.get(RECENT_VIEWS, []).slice(0, 5);
+  const more = !!state.search.moreHistory;
+  const searches = more ? store.get(RECENT_SEARCHES, []) : [];
+  const allViews = store.get(RECENT_VIEWS, []);
+  const views = allViews.slice(0, more ? 5 : 3);
   const out = [];
   if (searches.length) {
     out.push(h("div", { class: "history-head" }, h("h3", {}, "Recherches récentes"),
@@ -2757,8 +2787,8 @@ function renderHistory() {
       h("button", { type: "button", class: "filter", onclick: () => runSearch(q) }, icon("search"), q))));
   }
   if (views.length) {
-    out.push(h("div", { class: "history-head" }, h("h3", {}, "Recettes vues récemment"),
-      h("button", { type: "button", class: "link-btn", onclick: () => { store.del(RECENT_VIEWS); renderHome(); } }, "Effacer")));
+    out.push(h("div", { class: "history-head" }, h("h3", {}, "Vues récemment"),
+      more && h("button", { type: "button", class: "link-btn", onclick: () => { store.del(RECENT_VIEWS); renderHome(); } }, "Effacer")));
     out.push(h("ul", { class: "results recent-views" }, views.map((v) => h("li", {},
       h("button", { class: "result", type: "button", onclick: () => openRecentView(v) },
         thumbWithImage("r-thumb", safeImageUrl(v.image || (v.savedId && state.recipes.find((r) => r.id === v.savedId)?.image) || v.recipe?.image || (v.key && findBySource(v.key)?.image)),
@@ -2768,6 +2798,11 @@ function renderHistory() {
           h("div", { class: "r-meta" }, h("span", {}, v.site || "Recette"),
             v.savedId && h("span", { class: "badge" }, "Dans le carnet"),
             h("span", {}, formatDate(v.at)))))))));
+  }
+  const hidden = (more ? 0 : store.get(RECENT_SEARCHES, []).length) + Math.max(0, Math.min(5, allViews.length) - views.length);
+  if (hidden || more) {
+    out.push(h("button", { type: "button", class: "link-btn see-more", onclick: () => { state.search.moreHistory = !more; renderHome(); } },
+      more ? "Voir moins" : "Voir plus (recherches et recettes récentes)"));
   }
   return out;
 }
@@ -3988,11 +4023,17 @@ function renderRecipe(recipe, { saved }) {
   );
 
   // Deux colonnes sur tablette en paysage (ingrédients fixes à gauche, étapes à droite), une seule sur téléphone
+  // Un seul geste pour se lancer : étape 1 en évidence, écran gardé allumé
+  const startCookBtn = h("button", { type: "button", class: "btn primary start-cook", onclick: () => {
+    if (Wake.supported && !Wake.wanted) Wake.enable(true);
+    setActive(activeStep >= 0 ? activeStep : 0);
+  } }, icon("next"), activeStep >= 0 ? `Reprendre à l'étape ${activeStep + 1}` : "Commencer à cuisiner");
   const ingCol = recipe.ingredients.length ? h("div", { class: "col-ing" },
     servingsBox,
     resetBtn,
     h("div", { class: "section-title" }, h("h2", {}, "Ingrédients"), ingProgress),
-    h("ul", { class: "ingredients" }, ingNodes)) : null;
+    h("ul", { class: "ingredients" }, ingNodes),
+    recipe.steps.length ? startCookBtn : null) : null;
   const stepsCol = recipe.steps.length ? h("div", { class: "col-steps" },
     stepsTitle,
     h("p", { class: "step-hint" }, "Touchez l'étape en cours pour la repérer."),
