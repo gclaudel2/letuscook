@@ -907,14 +907,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.33.0"></script>
-<script src="extracteur.js?v=2.33.0"></script>
+<script src="config.js?v=2.33.1"></script>
+<script src="extracteur.js?v=2.33.1"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.33.0";
+const APP_VERSION = "2.33.1";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1295,6 +1295,27 @@ async function saveFromPreview(recipe, btn) {
     toast(`★ Enregistrée dans « ${Books.get(bookId)?.name || "Mon carnet"} »`);
     go(`#/r/${encodeURIComponent(s.id)}`, true);
   } catch { if (btn) btn.disabled = false; toast("Enregistrement impossible."); }
+}
+
+/** Étoile pleine touchée : la recette sort du carnet ; elle reste affichée (étoile vide) pour pouvoir la remettre. */
+async function unsaveRecipe(recipe) {
+  const book = Books.get(bookOf(recipe));
+  const my = recipe.my || {};
+  const hasNotes = !!(my.stars || (my.text || "").trim() || my.cooked?.length);
+  const warn = [
+    hasNotes && "vos notes (étoiles, remarques, « faite le ») seront perdues",
+    book?.shared && `elle disparaîtra aussi chez les autres membres de « ${book.name} »`,
+  ].filter(Boolean);
+  if (warn.length && !confirm(`Retirer « ${recipe.title} » du carnet ?\n\nAttention : ${warn.join(" ; ")}.`)) return;
+  const p = store.get(`zbc.progress.${recipe.id}`, null); // on garde l'avancement (étape, portions)
+  await deleteRecipe(recipe.id);
+  const preview = { ...recipe };
+  for (const k of ["id", "savedAt", "updatedAt", "updatedBy", "book", "my", "unseen"]) delete preview[k];
+  if (p) store.set("zbc.progress.apercu", p); else store.del("zbc.progress.apercu");
+  state.preview = preview;
+  state.previewWarnings = [];
+  toast(`Retirée de « ${book?.name || "Mon carnet"} »`);
+  go("#/apercu", true);
 }
 
 /** Petit menu « dans quel carnet ? » → id choisi (ou null). */
@@ -3843,8 +3864,8 @@ function renderRecipe(recipe, { saved }) {
     h("button", { class: "icon-btn", "aria-label": "Nouveau minuteur", title: "Minuteur", onclick: () => askFreeTimer(recipe) }, icon("clock")),
     h("button", { class: "icon-btn", "aria-label": "Partager la recette", onclick: () => openShare(recipe) }, icon("share")),
     saved
-      ? h("button", { class: "icon-btn fav on", "aria-label": `Enregistrée dans « ${Books.get(bookOf(recipe))?.name || "Mon carnet"} »`, title: "Dans le carnet",
-          onclick: () => toast(`Déjà enregistrée dans « ${Books.get(bookOf(recipe))?.name || "Mon carnet"} »`) }, icon("star", true))
+      ? h("button", { class: "icon-btn fav on", "aria-label": `Retirer du carnet « ${Books.get(bookOf(recipe))?.name || "Mon carnet"} »`, title: "Retirer du carnet",
+          onclick: () => unsaveRecipe(recipe) }, icon("star", true))
       : h("button", { class: "icon-btn fav", "aria-label": "Enregistrer la recette (favori)", title: "Enregistrer",
           onclick: (e) => saveFromPreview(recipe, e.currentTarget) }, icon("star")),
   ];
