@@ -212,13 +212,14 @@
   .icon-btn:active { background: var(--line); }
   .icon-btn svg { width: 22px; height: 22px; flex: none; }
   .icon-btn.on { background: var(--accent); color: var(--accent-ink); }
-  .icon-btn.save { padding: 0 16px 0 13px; flex: none; }
+  .icon-btn.fav svg { width: 26px; height: 26px; }
+  .icon-btn.fav.on { background: transparent; color: var(--accent); }
+  .save-hint { width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer; }
+  .save-hint svg { color: var(--accent); }
   @media (max-width: 400px) {
     .topbar .wrap { gap: 2px; }
     .topbar .icon-btn { min-width: 40px; padding: 0 8px; }
     #btn-wake .label { display: none; }   /* l'icône soleil suffit sur petit écran */
-    .topbar .icon-btn.save { padding: 0 14px; font-size: 15px; }
-    .topbar .icon-btn.save svg { display: none; }
   }
   .mini-brand { font: 700 17px/1 var(--serif); letter-spacing: -0.01em; }
 
@@ -906,14 +907,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.32.0"></script>
-<script src="extracteur.js?v=2.32.0"></script>
+<script src="config.js?v=2.33.0"></script>
+<script src="extracteur.js?v=2.33.0"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.32.0";
+const APP_VERSION = "2.33.0";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1279,6 +1280,21 @@ async function moveRecipe(recipe, toBook) {
   Sync.mark(from, recipe.id, "del");
   if (toBook === LOCAL_BOOK) delete recipe.book; else recipe.book = toBook;
   await touchRecipe(recipe);
+}
+
+/** Enregistre la recette affichée (aperçu) dans le carnet choisi, puis l'ouvre depuis le carnet. */
+async function saveFromPreview(recipe, btn) {
+  const bookId = await chooseBook("Enregistrer dans…");
+  if (!bookId) return;
+  if (btn) btn.disabled = true;
+  try {
+    const s = await saveRecipe(recipe, bookId);
+    const p = store.get("zbc.progress.apercu", null);
+    if (p) { store.set(`zbc.progress.${s.id}`, p); store.del("zbc.progress.apercu"); }
+    state.preview = null;
+    toast(`★ Enregistrée dans « ${Books.get(bookId)?.name || "Mon carnet"} »`);
+    go(`#/r/${encodeURIComponent(s.id)}`, true);
+  } catch { if (btn) btn.disabled = false; toast("Enregistrement impossible."); }
 }
 
 /** Petit menu « dans quel carnet ? » → id choisi (ou null). */
@@ -3655,7 +3671,8 @@ const longDate = (iso) => new Date(iso).toLocaleDateString("fr-FR", { day: "nume
 const todayKey = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 
 function notesCard(recipe, saved) {
-  if (!saved) return h("div", { class: "my-notes muted" }, icon("star"), h("span", {}, "Enregistrez la recette pour la noter et y ajouter vos remarques."));
+  if (!saved) return h("button", { type: "button", class: "my-notes muted save-hint", onclick: (e) => saveFromPreview(recipe, e.currentTarget) },
+    icon("star"), h("span", {}, "Enregistrez la recette pour la noter et y ajouter vos remarques."));
   const my = recipe.my || (recipe.my = {});
   my.cooked = Array.isArray(my.cooked) ? my.cooked : [];
   let saveTimer = 0;
@@ -3825,22 +3842,11 @@ function renderRecipe(recipe, { saved }) {
       icon("sun"), h("span", { class: "label" }, "Écran")),
     h("button", { class: "icon-btn", "aria-label": "Nouveau minuteur", title: "Minuteur", onclick: () => askFreeTimer(recipe) }, icon("clock")),
     h("button", { class: "icon-btn", "aria-label": "Partager la recette", onclick: () => openShare(recipe) }, icon("share")),
-    !saved && h("button", {
-      class: "icon-btn on save", onclick: async (e) => {
-        const btn = e.currentTarget;
-        const bookId = await chooseBook("Enregistrer dans…");
-        if (!bookId) return;
-        btn.disabled = true;
-        try {
-          const s = await saveRecipe(recipe, bookId);
-          const p = store.get("zbc.progress.apercu", null);
-          if (p) { store.set(`zbc.progress.${s.id}`, p); store.del("zbc.progress.apercu"); }
-          state.preview = null;
-          toast(`Enregistrée dans « ${Books.get(bookId)?.name || "Mon carnet"} »`);
-          go(`#/r/${encodeURIComponent(s.id)}`, true);
-        } catch { btn.disabled = false; toast("Enregistrement impossible."); }
-      },
-    }, icon("bookmark"), "Enregistrer"),
+    saved
+      ? h("button", { class: "icon-btn fav on", "aria-label": `Enregistrée dans « ${Books.get(bookOf(recipe))?.name || "Mon carnet"} »`, title: "Dans le carnet",
+          onclick: () => toast(`Déjà enregistrée dans « ${Books.get(bookOf(recipe))?.name || "Mon carnet"} »`) }, icon("star", true))
+      : h("button", { class: "icon-btn fav", "aria-label": "Enregistrer la recette (favori)", title: "Enregistrer",
+          onclick: (e) => saveFromPreview(recipe, e.currentTarget) }, icon("star")),
   ];
 
   /* En-tête */
