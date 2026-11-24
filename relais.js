@@ -16,6 +16,8 @@
  *   ALLOWED_ORIGINS    ex. "https://votre-compte.github.io"  (plusieurs : séparées par des virgules)
  *   ACCESS_CODE        facultatif mais conseillé : code à saisir une fois dans l'appli   [Secret]
  *   CARNETS            (Bindings › D1 database) base D1 pour les carnets partagés ; tables créées automatiquement
+ *   APNS_KEY, APNS_KEY_ID  (facultatif, secrets) clé de notifications Apple (.p8) : prévient les membres d'un carnet partagé
+ *                      quand une recette y est ajoutée (APNS_TEAM_ID et APNS_TOPIC ont des valeurs par défaut)
  *   AI_PASS_MONTHLY    (facultatif) nombre d'utilisations de l'IA par mois pour chaque accès offert à un ami (défaut 300)
  *   APP_KEY            clé de l'app iPhone « Let Us Cook » (App Store) : remplace le code d'accès  [Secret]
  *                      Avec cette clé, l'IA (/ia, /photo, /voix) n'utilise JAMAIS les clés du relais : seulement la clé
@@ -821,6 +823,7 @@ function carnetDb(env) {
     env.CARNETS.prepare("CREATE TABLE IF NOT EXISTS members (book_id TEXT NOT NULL, member_id TEXT NOT NULL, token_hash TEXT NOT NULL, name TEXT NOT NULL, owner INTEGER NOT NULL DEFAULT 0, joined_at INTEGER NOT NULL, PRIMARY KEY (book_id, member_id))"),
     env.CARNETS.prepare("CREATE TABLE IF NOT EXISTS items (book_id TEXT NOT NULL, id TEXT NOT NULL, data TEXT, updated_at INTEGER NOT NULL, rev INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, by_name TEXT, PRIMARY KEY (book_id, id))"),
     env.CARNETS.prepare("CREATE INDEX IF NOT EXISTS items_rev ON items (book_id, rev)"),
+    env.CARNETS.prepare("CREATE TABLE IF NOT EXISTS push_tokens (book_id TEXT NOT NULL, member_id TEXT NOT NULL, token TEXT NOT NULL, env TEXT NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (book_id, member_id))"),
   ]).catch((err) => { carnetSchema = null; throw err; });
   return carnetSchema.then(() => env.CARNETS);
 }
@@ -845,7 +848,47 @@ async function carnetInfo(db, bookId) {
   return { book, members: results.map((m) => ({ id: m.id, name: m.name, owner: !!m.owner })) };
 }
 
-async function handleCarnet(action, body, env) {
+// ── Notifications Apple (APNs) : « Anne-Caroline a ajouté « Gratin » » chez les autres membres ──
+let apnsJwt = null;
+async function apnsAuth(env) {
+  if (apnsJwt && Date.now() - apnsJwt.at < 45 * 60_000) return apnsJwt.token; // Apple : un jeton toutes les 20 à 60 min
+  const b64url = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  const pem = String(env.APNS_KEY).replace(/-----[^-]+-----/g, "").replace(/\s+/g, "");
+  const der = Uint8Array.from(atob(pem), (ch) => ch.charCodeAt(0));
+  const key = await crypto.subtle.importKey("pkcs8", der, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
+  const enc = (o) => b64url(new TextEncoder().encode(JSON.stringify(o)));
+  const unsigned = `${enc({ alg: "ES256", kid: env.APNS_KEY_ID })}.${enc({ iss: env.APNS_TEAM_ID || "M2838V3J42", iat: Math.floor(Date.now() / 1000) })}`;
+  const sig = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, new TextEncoder().encode(unsigned));
+  apnsJwt = { token: `${unsigned}.${b64url(sig)}`, at: Date.now() };
+  return apnsJwt.token;
+}
+async function notifyBook(env, db, bookId, me, titles) {
+  const { results } = await db.prepare("SELECT member_id, token, env FROM push_tokens WHERE book_id = ? AND member_id != ?").bind(bookId, me.member_id).all();
+  if (!results?.length) return;
+  const book = await db.prepare("SELECT name FROM books WHERE id = ?").bind(bookId).first();
+  const named = titles.filter(Boolean);
+  const body = titles.length === 1
+    ? `${me.name} a ajouté « ${named[0] || "une recette"} »`
+    : `${me.name} a ajouté ${titles.length} recettes${named.length ? ` : ${named.slice(0, 3).map((t) => `« ${t} »`).join(", ")}${named.length > 3 ? "…" : ""}` : ""}`;
+  const payload = JSON.stringify({ aps: { alert: { title: book?.name || "Carnet partagé", body }, sound: "default", "thread-id": bookId }, bookId });
+  const auth = await apnsAuth(env);
+  await Promise.all(results.map(async (r) => {
+    const host = r.env === "dev" ? "api.sandbox.push.apple.com" : "api.push.apple.com";
+    const res = await fetch(`https://${host}/3/device/${r.token}`, {
+      method: "POST", body: payload,
+      headers: { authorization: `bearer ${auth}`, "apns-topic": env.APNS_TOPIC || "com.letusgeek.letuscook", "apns-push-type": "alert", "apns-priority": "10", "content-type": "application/json" },
+    }).catch(() => null);
+    if (!res) return;
+    if (res.status === 410 || res.status === 400) { // appli supprimée, ou jeton d'un autre environnement : on l'oublie
+      const why = await res.json().catch(() => ({}));
+      if (res.status === 410 || /BadDeviceToken|DeviceTokenNotForTopic/.test(why.reason || "")) {
+        await db.prepare("DELETE FROM push_tokens WHERE book_id = ? AND member_id = ?").bind(bookId, r.member_id).run();
+      }
+    } else if (res.status === 403) apnsJwt = null; // jeton refusé : on en refera un
+  }));
+}
+
+async function handleCarnet(action, body, env, ctx) {
   const db = await carnetDb(env);
   const now = Date.now();
 
@@ -876,11 +919,16 @@ async function handleCarnet(action, body, env) {
 
   if (action === "sync") {
     const changes = Array.isArray(body.changes) ? body.changes.slice(0, CARNET_MAX_BATCH) : [];
+    const added = []; // recettes nouvelles dans le carnet : on prévient les autres membres
     for (const c of changes) {
       if (!c || !isId(c.id) || !Number.isFinite(c.updatedAt)) continue;
       const deleted = c.deleted ? 1 : 0;
       const data = deleted ? null : typeof c.data === "string" ? c.data : null;
       if (!deleted && (!data || data.length > CARNET_MAX_ITEM)) continue;
+      if (!deleted) {
+        const before = await db.prepare("SELECT deleted FROM items WHERE book_id = ? AND id = ?").bind(body.bookId, c.id).first();
+        if (!before || before.deleted) { let title = ""; try { title = cleanName(JSON.parse(data).title, 80); } catch { /* */ } added.push(title); }
+      }
       const { rev } = await db.prepare("UPDATE books SET rev = rev + 1 WHERE id = ? RETURNING rev").bind(body.bookId).first();
       // la modification la plus récente gagne (égalité : la dernière arrivée)
       await db.prepare(
@@ -888,6 +936,10 @@ async function handleCarnet(action, body, env) {
         "ON CONFLICT (book_id, id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at, rev = excluded.rev, " +
         "deleted = excluded.deleted, by_name = excluded.by_name WHERE excluded.updated_at >= items.updated_at",
       ).bind(body.bookId, c.id, data, Math.round(c.updatedAt), rev, deleted, me.name).run();
+    }
+    if (added.length && env.APNS_KEY && env.APNS_KEY_ID) {
+      const task = notifyBook(env, db, body.bookId, me, added).catch((err) => console.warn("APNs", err));
+      if (ctx?.waitUntil) ctx.waitUntil(task); else await task;
     }
     const since = Number.isFinite(body.since) ? body.since : 0;
     const { results } = await db.prepare("SELECT id, data, updated_at, deleted, by_name, rev FROM items WHERE book_id = ? AND rev > ? ORDER BY rev LIMIT 60")
@@ -899,6 +951,19 @@ async function handleCarnet(action, body, env) {
       members: info.members, me: me.member_id, owner: !!me.owner,
       changes: results.map((r) => ({ id: r.id, data: r.data, updatedAt: r.updated_at, deleted: !!r.deleted, by: r.by_name })),
     };
+  }
+
+  if (action === "push") { // iPhone de ce membre à prévenir des nouvelles recettes (ou plus de notifications : off)
+    if (body.off) {
+      await db.prepare("DELETE FROM push_tokens WHERE book_id = ? AND member_id = ?").bind(body.bookId, me.member_id).run();
+      return { ok: true };
+    }
+    const token = String(body.push || "");
+    if (!/^[0-9a-f]{64,200}$/i.test(token)) throw new RelayError("BAD_REQUEST", "Jeton de notification invalide.", 400);
+    await db.prepare("INSERT INTO push_tokens (book_id, member_id, token, env, updated_at) VALUES (?, ?, ?, ?, ?) " +
+      "ON CONFLICT (book_id, member_id) DO UPDATE SET token = excluded.token, env = excluded.env, updated_at = excluded.updated_at")
+      .bind(body.bookId, me.member_id, token.toLowerCase(), body.env === "dev" ? "dev" : "prod", now).run();
+    return { ok: true, enabled: !!(env.APNS_KEY && env.APNS_KEY_ID) };
   }
 
   if (action === "lien") { // lien d'invitation actuel ; le créateur peut en faire un nouveau (l'ancien ne marche plus)
@@ -922,15 +987,21 @@ async function handleCarnet(action, body, env) {
   if (action === "retirer") {
     if (!me.owner) throw new RelayError("NOT_OWNER", "Seul le créateur du carnet peut retirer un membre.", 403);
     if (!isId(body.memberId) || body.memberId === me.member_id) throw new RelayError("BAD_REQUEST", "Membre inconnu.", 400);
-    await db.prepare("DELETE FROM members WHERE book_id = ? AND member_id = ?").bind(body.bookId, body.memberId).run();
+    await db.batch([
+      db.prepare("DELETE FROM members WHERE book_id = ? AND member_id = ?").bind(body.bookId, body.memberId),
+      db.prepare("DELETE FROM push_tokens WHERE book_id = ? AND member_id = ?").bind(body.bookId, body.memberId),
+    ]);
     return { ok: true, ...(await carnetInfo(db, body.bookId)) };
   }
 
   if (action === "quitter") {
-    await db.prepare("DELETE FROM members WHERE book_id = ? AND member_id = ?").bind(body.bookId, me.member_id).run();
+    await db.batch([
+      db.prepare("DELETE FROM members WHERE book_id = ? AND member_id = ?").bind(body.bookId, me.member_id),
+      db.prepare("DELETE FROM push_tokens WHERE book_id = ? AND member_id = ?").bind(body.bookId, me.member_id),
+    ]);
     const left = await db.prepare("SELECT member_id FROM members WHERE book_id = ? ORDER BY joined_at LIMIT 1").bind(body.bookId).first();
     if (!left) { // plus personne : le carnet est effacé du serveur
-      await db.batch([db.prepare("DELETE FROM items WHERE book_id = ?").bind(body.bookId), db.prepare("DELETE FROM books WHERE id = ?").bind(body.bookId)]);
+      await db.batch([db.prepare("DELETE FROM items WHERE book_id = ?").bind(body.bookId), db.prepare("DELETE FROM push_tokens WHERE book_id = ?").bind(body.bookId), db.prepare("DELETE FROM books WHERE id = ?").bind(body.bookId)]);
     } else if (me.owner) { // le plus ancien membre devient responsable
       await db.prepare("UPDATE members SET owner = 1 WHERE book_id = ? AND member_id = ?").bind(body.bookId, left.member_id).run();
     }
@@ -942,6 +1013,7 @@ async function handleCarnet(action, body, env) {
     await db.batch([
       db.prepare("DELETE FROM items WHERE book_id = ?").bind(body.bookId),
       db.prepare("DELETE FROM members WHERE book_id = ?").bind(body.bookId),
+      db.prepare("DELETE FROM push_tokens WHERE book_id = ?").bind(body.bookId),
       db.prepare("DELETE FROM books WHERE id = ?").bind(body.bookId),
     ]);
     return { ok: true };
@@ -1064,7 +1136,7 @@ export default {
       const body = await request.json().catch(() => null);
       if (pathname.startsWith("/acces/")) return json(await handleAiPass(pathname.slice(7), body, env), 200, cors);
       if (pathname === "/cle") return json(await handleKeyCheck(env), 200, cors);
-      if (pathname.startsWith("/carnet/")) return json(await handleCarnet(pathname.slice(8), body, env), 200, cors);
+      if (pathname.startsWith("/carnet/")) return json(await handleCarnet(pathname.slice(8), body, env, ctx), 200, cors);
       if (pathname === "/page") return json(await handlePage(body, env), 200, cors);
       if (pathname === "/ia") return streamedJson(() => handleAi(body, env), cors, ctx);
       if (pathname === "/voix") return json(await handleVoice(body, env), 200, cors);

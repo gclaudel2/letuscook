@@ -16,6 +16,41 @@ let appHost = "gclaudel2.github.io"
 let relayAppKey = "CLE_APP_KEY_DU_RELAIS"
 let slate = UIColor(red: 0x1F / 255, green: 0x2A / 255, blue: 0x26 / 255, alpha: 1)
 
+// ── Notifications des carnets partagés : jeton de l'iPhone et ouverture d'un carnet ──
+enum PushBridge {
+    static let notification = Notification.Name("letuscook.script")
+    static var pending: [String] = []          // à exécuter quand la page sera chargée
+    static var pageReady = false
+    #if DEBUG
+    static let env = "dev"
+    #else
+    static let env = "prod"                    // TestFlight et App Store
+    #endif
+    static var token: String? { UserDefaults.standard.string(forKey: "pushToken") }
+
+    static func tokenScript(_ token: String) -> String {
+        "window.LUC_PUSH = { token: \"\(token)\", env: \"\(env)\" }; window.LUC_onPushToken && window.LUC_onPushToken(window.LUC_PUSH);"
+    }
+    static func received(_ token: String) {
+        UserDefaults.standard.set(token, forKey: "pushToken")
+        run(tokenScript(token))
+    }
+    static func openBook(_ bookId: String) {
+        let safe = bookId.filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
+        run("window.LUC_openBook ? window.LUC_openBook(\"\(safe)\") : (location.hash = \"#/carnet\")")
+    }
+    static func run(_ script: String) {
+        if pageReady { NotificationCenter.default.post(name: notification, object: script) } else { pending.append(script) }
+    }
+    /// La page demande à recevoir les notifications (elle a un carnet partagé) : autorisation, puis jeton
+    static func enable() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
+            guard granted else { return }
+            DispatchQueue.main.async { UIApplication.shared.registerForRemoteNotifications() }
+        }
+    }
+}
+
 // ── Liens qui ouvrent l'app : https://<relais>/rejoindre/<carnet>.<code> → page « rejoindre » de letuscook ──
 enum LinkRouter {
     static let notification = Notification.Name("letuscook.openLink")
@@ -58,7 +93,8 @@ struct WebView: UIViewRepresentable {
         config.userContentController.add(context.coordinator, name: "letuscook")
         // Version App Store : clé du relais (remplace le code d'accès) et aucune fonction IA
         config.userContentController.addUserScript(WKUserScript(
-            source: "window.LUC_APP = Object.freeze({ key: \"\(relayAppKey)\", noAI: true, store: true });",
+            source: "window.LUC_APP = Object.freeze({ key: \"\(relayAppKey)\", noAI: true, store: true });"
+                + (PushBridge.token.map { "window.LUC_PUSH = { token: \"\($0)\", env: \"\(PushBridge.env)\" };" } ?? ""),
             injectionTime: .atDocumentStart, forMainFrameOnly: true))
 
         let web = WKWebView(frame: .zero, configuration: config)
@@ -76,6 +112,7 @@ struct WebView: UIViewRepresentable {
         web.load(URLRequest(url: LinkRouter.pending ?? appURL, cachePolicy: .reloadRevalidatingCacheData))
         LinkRouter.pending = nil
         context.coordinator.listenForLinks()
+        context.coordinator.listenForScripts()
         return web
     }
 
@@ -85,6 +122,23 @@ struct WebView: UIViewRepresentable {
 @MainActor
 final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate, WKUIDelegate {
     weak var web: WKWebView?
+
+    func listenForScripts() {
+        NotificationCenter.default.addObserver(forName: PushBridge.notification, object: nil, queue: .main) { [weak self] note in
+            guard let script = note.object as? String else { return }
+            MainActor.assumeIsolated { self?.web?.evaluateJavaScript(script) }
+        }
+    }
+
+    // Page chargée : on exécute ce qui attendait (notification touchée au lancement, jeton reçu tôt)
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        PushBridge.pageReady = true
+        let scripts = PushBridge.pending
+        PushBridge.pending = []
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            for script in scripts { webView.evaluateJavaScript(script) }
+        }
+    }
 
     func listenForLinks() {
         NotificationCenter.default.addObserver(forName: LinkRouter.notification, object: nil, queue: .main) { [weak self] note in
@@ -104,6 +158,8 @@ final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate,
             UIApplication.shared.isIdleTimerDisabled = (body["on"] as? Bool) ?? false
         case "timers":
             TimerNotifications.sync(body["list"] as? [[String: Any]] ?? [])
+        case "push-enable":
+            PushBridge.enable()
         default:
             break
         }

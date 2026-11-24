@@ -283,6 +283,10 @@
   .book-chip[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
   .book-chip[aria-selected="true"] small { color: inherit; opacity: .8; }
   .book-chip.add { border-style: dashed; color: var(--muted); }
+  .new-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--danger, #e5534b); margin-left: 2px; }
+  .card { position: relative; }
+  .new-badge { position: absolute; top: 8px; left: 8px; z-index: 1; background: var(--danger, #e5534b); color: #fff; box-shadow: 0 1px 4px rgb(0 0 0 / .25); }
+  .tabbar-count.new { background: var(--danger, #e5534b); color: #fff; }
   .book-info { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 12px; font-size: 14px; color: var(--muted); }
   .members { list-style: none; margin: 6px 0 0; padding: 0; }
   .member { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line); }
@@ -902,14 +906,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.31.2"></script>
-<script src="extracteur.js?v=2.31.2"></script>
+<script src="config.js?v=2.32.0"></script>
+<script src="extracteur.js?v=2.32.0"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.31.2";
+const APP_VERSION = "2.32.0";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1145,6 +1149,8 @@ const Sync = {
   },
   async run(id) {
     let changed = false;
+    const arrived = [];
+    const firstSync = !(Books.get(id)?.rev); // première synchro (on vient de rejoindre) : pas de « nouveau » partout
     for (let round = 0; round < 25; round++) {
       const book = Books.get(id);
       if (!book?.shared || !book.token) return;
@@ -1179,6 +1185,9 @@ const Sync = {
         if (local && bookOf(local) === id && recipeTime(local) >= c.updatedAt) continue;
         let r; try { r = JSON.parse(c.data); } catch { continue; }
         Object.assign(r, { id: c.id, book: id, updatedAt: c.updatedAt, updatedBy: c.by || "" });
+        if (!local && firstSync) delete r.unseen;
+        else if (!local && c.by && c.by !== myName()) { r.unseen = true; arrived.push({ by: c.by, title: r.title }); } // nouvelle, ajoutée par un autre membre
+        else if (local?.unseen) r.unseen = true;
         await DB.put(r);
         const i = state.recipes.findIndex((x) => x.id === c.id);
         if (i >= 0) state.recipes[i] = r; else state.recipes.unshift(r);
@@ -1187,8 +1196,26 @@ const Sync = {
       Books.update(id, { rev: res.rev, name: res.name || book.name, members: res.members || [], owner: !!res.owner, me: res.me, lastSync: Date.now(), error: "" });
       if (!res.more && !Object.keys(this.dirty[id] || {}).length) break;
     }
+    if (arrived.length) {
+      const name = Books.get(id)?.name || "Carnet partagé";
+      const by = [...new Set(arrived.map((a) => a.by))].join(" et ");
+      toast(arrived.length === 1 ? `${by} a ajouté « ${arrived[0].title} » dans ${name}` : `${by} a ajouté ${arrived.length} recettes dans ${name}`);
+    }
     if (changed) refreshAfterSync();
     else if (location.hash === "#/carnet") refreshAfterSync(); // « à jour il y a … »
+    this.registerPush();
+  },
+  /** iPhone (app) : demande au relais de prévenir cet appareil quand quelqu'un ajoute une recette dans un carnet partagé. */
+  async registerPush() {
+    const push = window.LUC_PUSH;
+    const shared = Books.list().filter((b) => b.shared && b.token);
+    if (!Native || !shared.length) return;
+    if (!push?.token) { if (!this.askedPush) { this.askedPush = true; Native.post({ type: "push-enable" }); } return; }
+    for (const b of shared) {
+      if (b.pushReg === push.token) continue;
+      try { await ZBC.callRelay("/carnet/push", { bookId: b.id, token: b.token, push: push.token, env: push.env }); Books.update(b.id, { pushReg: push.token }); }
+      catch (err) { console.warn("push", err); }
+    }
   },
   /** On ne fait plus partie du carnet (retiré, ou carnet supprimé) : ses recettes restent dans « Mon carnet ». */
   async detach(id) {
@@ -1213,13 +1240,22 @@ function serializeForBook(r) {
   return JSON.stringify(copy);
 }
 function refreshAfterSync() {
+  if (!$("#tabbar").hidden) renderTabbar();
   const a = document.activeElement;
   if (a && a.matches("input, textarea") && a.closest("#app")) return; // on ne coupe pas une saisie en cours
   if (location.hash === "#/carnet") renderHome();
 }
 window.addEventListener("online", () => Sync.schedule(500));
+// L'app iPhone donne son jeton de notification (après l'autorisation) : on l'enregistre pour chaque carnet partagé
+window.LUC_onPushToken = (p) => { if (p?.token) { window.LUC_PUSH = p; Sync.registerPush(); } };
+// Notification touchée : on ouvre le carnet concerné, à jour
+window.LUC_openBook = (bookId) => {
+  if (bookId && Books.get(bookId)) Books.setCurrent(bookId);
+  go("#/carnet");
+  Sync.all();
+};
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") Sync.schedule(800); });
-setInterval(() => { if (document.visibilityState === "visible") Sync.all(); }, 45_000);
+setInterval(() => { if (document.visibilityState === "visible" && Books.list().some((b) => b.shared)) Sync.all(); }, 15_000);
 
 /** Mise à jour d'une recette du carnet (notes, déplacement…) : date, enregistrement, synchro. */
 async function touchRecipe(recipe) {
@@ -1293,6 +1329,7 @@ function openNewBook() {
         const res = await ZBC.callRelay("/carnet/creer", { name, member: me });
         Books.add({ id: res.book.id, name: res.book.name, shared: true, token: res.token, me: res.memberId, owner: true, rev: 0, invite: res.invite, members: [{ id: res.memberId, name: me, owner: true }] });
         Books.setCurrent(res.book.id); close(); renderHome();
+        Sync.registerPush();
         openInvite(Books.get(res.book.id));
       } catch (err) { e.currentTarget.disabled = false; toast(err.message || "Création impossible."); }
     } }, "Créer le carnet"),
@@ -2058,6 +2095,7 @@ function renderHome() {
 function renderTabbar() {
   const bar = $("#tabbar");
   const n = state.recipes.length;
+  const unseen = state.recipes.filter((r) => r.unseen).length; // recettes ajoutées par d'autres, pas encore ouvertes
   const tab = (id, hash, iconName, label, extra) => h("button", {
     type: "button", class: "tabbar-btn", "aria-current": state.tab === id ? "page" : "false",
     onclick: () => { if (state.tab === id && id === "recherche") resetHome(); else go(hash); },
@@ -2066,7 +2104,7 @@ function renderTabbar() {
     tab("recherche", "#/", "search", "Chercher"),
     tab("extraire", "#/lien", "camera", "Analyser"),
     tab("chefs", "#/chefs", "star", "Explorer"),
-    tab("carnet", "#/carnet", "bookmark", "Carnet", n ? h("span", { class: "tabbar-count" }, n > 99 ? "99+" : String(n)) : null));
+    tab("carnet", "#/carnet", "bookmark", "Carnet", unseen ? h("span", { class: "tabbar-count new", "aria-label": `${unseen} nouvelle(s)` }, String(unseen)) : n ? h("span", { class: "tabbar-count" }, n > 99 ? "99+" : String(n)) : null));
   bar.hidden = false;
   document.body.classList.add("has-tabbar");
 }
@@ -2895,7 +2933,8 @@ function renderCarnet() {
     books.map((b) => h("button", {
       type: "button", class: "book-chip", role: "tab", "aria-selected": String(b.id === cur),
       onclick: () => { Books.setCurrent(b.id); state.query = ""; renderHome(); if (b.shared) Sync.book(b.id); },
-    }, b.shared ? icon("users") : null, h("span", {}, b.name), h("small", {}, String(Books.count(b.id))))),
+    }, b.shared ? icon("users") : null, h("span", {}, b.name), h("small", {}, String(Books.count(b.id))),
+      state.recipes.some((r) => r.unseen && bookOf(r) === b.id) ? h("span", { class: "new-dot", "aria-label": "nouvelles recettes" }) : null)),
     h("button", { type: "button", class: "book-chip add", "aria-label": "Nouveau carnet ou rejoindre", onclick: openNewBook }, icon("plus"), h("span", {}, "Carnet")));
   const others = (book.members || []).filter((m) => m.id !== book.me).map((m) => m.name);
   const info = h("div", { class: "book-info" },
@@ -2993,6 +3032,7 @@ function recipeCard(r) {
   const meta = [r.my?.stars ? "★".repeat(r.my.stars) : "", r.siteName, formatMinutes(r.totalTimeMin), cookedN ? `faite ${cookedN}×` : ""].filter(Boolean).join(" · ");
   return h("a", { class: "card", href: `#/r/${encodeURIComponent(r.id)}` },
     thumb,
+    r.unseen && h("span", { class: "badge new-badge" }, r.updatedBy ? `Nouveau · ${r.updatedBy}` : "Nouveau"),
     h("div", { class: "body" }, h("h3", {}, r.title), meta && h("div", { class: "meta" }, meta)),
   );
 }
@@ -3768,6 +3808,7 @@ function quantityLabel(ing, factor) {
 
 function renderRecipe(recipe, { saved }) {
   rememberView(recipe, saved);
+  if (saved && recipe.unseen) { delete recipe.unseen; DB.put(recipe).catch(() => {}); } // vue : plus « Nouveau »
   const progressKey = `zbc.progress.${saved ? recipe.id : "apercu"}`;
   const progress = store.get(progressKey, {});
   const checked = new Set(progress.checked || []);
