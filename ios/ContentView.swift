@@ -93,7 +93,7 @@ struct WebView: UIViewRepresentable {
         config.userContentController.add(context.coordinator, name: "letuscook")
         // Version App Store : clé du relais (remplace le code d'accès) et aucune fonction IA
         config.userContentController.addUserScript(WKUserScript(
-            source: "window.LUC_APP = Object.freeze({ key: \"\(relayAppKey)\", noAI: true, store: true });"
+            source: "window.LUC_APP = Object.freeze({ key: \"\(relayAppKey)\", noAI: true, store: true, appleAI: \"\(AppleAI.status)\" });"
                 + (PushBridge.token.map { "window.LUC_PUSH = { token: \"\($0)\", env: \"\(PushBridge.env)\" };" } ?? ""),
             injectionTime: .atDocumentStart, forMainFrameOnly: true))
 
@@ -160,6 +160,19 @@ final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate,
             TimerNotifications.sync(body["list"] as? [[String: Any]] ?? [])
         case "push-enable":
             PushBridge.enable()
+        case "apple-ai":   // texte → recette par l'IA de l'iPhone ; réponse renvoyée à la page avec le même id
+            let id = (body["id"] as? String ?? "").filter { $0.isLetter || $0.isNumber }
+            let text = body["text"] as? String ?? ""
+            let title = body["title"] as? String ?? ""
+            let source = body["source"] as? String ?? "page"
+            Task { [weak self] in
+                let result = await AppleAI.recipe(text: text, title: title, source: source)
+                let data = (try? JSONSerialization.data(withJSONObject: result)) ?? Data("{\"ok\":false}".utf8)
+                let json = String(data: data, encoding: .utf8) ?? "{\"ok\":false}"
+                self?.web?.evaluateJavaScript("window.LUC_appleAIDone && window.LUC_appleAIDone(\"\(id)\", \(json)); void 0", completionHandler: nil)
+            }
+        case "apple-ai-status":
+            web?.evaluateJavaScript("window.LUC_appleAIStatus && window.LUC_appleAIStatus(\"\(AppleAI.status)\")")
         default:
             break
         }
