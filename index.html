@@ -916,14 +916,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.34.0"></script>
-<script src="extracteur.js?v=2.34.0"></script>
+<script src="config.js?v=2.34.1"></script>
+<script src="extracteur.js?v=2.34.1"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.34.0";
+const APP_VERSION = "2.34.1";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -4462,6 +4462,7 @@ function drawAppleAI() {
     available: "Disponible : Let Us Cook lit les pages de recettes difficiles et remet en forme vos photos de recettes avec l'IA intégrée à l'iPhone. Gratuit, hors ligne, rien ne quitte votre téléphone.",
     notEnabled: "Activez Apple Intelligence dans Réglages › Apple Intelligence et Siri pour que Let Us Cook l'utilise (gratuit, rien ne quitte votre téléphone).",
     notReady: "Apple Intelligence se télécharge sur votre iPhone : elle sera utilisée dès qu'elle sera prête.",
+    oldApp: "Pour utiliser l'IA intégrée à votre iPhone (gratuite, rien ne quitte le téléphone), installez la dernière version de l'app Let Us Cook depuis TestFlight.",
     notEligible: "Cet iPhone ne prend pas en charge Apple Intelligence (iPhone 15 Pro ou plus récent). Vous pouvez utiliser Gemini ci-dessous.",
   }[st] || "L'IA de l'iPhone demande iOS 26 et un iPhone compatible Apple Intelligence (iPhone 15 Pro ou plus récent).";
   const both = st === "available";

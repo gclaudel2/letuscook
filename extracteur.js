@@ -37,7 +37,7 @@
   const noAI = () => !!(APP && APP.noAI) && !userAiKey() && !aiPass();
 
   // ── IA de l'iPhone (Apple Intelligence, sur l'appareil) : seulement dans l'app iPhone compatible ──
-  let appleStatus = (APP && APP.appleAI) || "unsupported";
+  let appleStatus = (APP && APP.appleAI) || (APP ? "oldApp" : "unsupported"); // oldApp : app iPhone d'avant l'IA de l'iPhone
   window.LUC_appleAIStatus = (st) => { appleStatus = st; };
   const AI_ENGINE = "zbc.aiEngine"; // "auto" (iPhone d'abord, puis Gemini), "apple", "gemini"
   const aiEngine = () => { try { return localStorage.getItem(AI_ENGINE) || "auto"; } catch { return "auto"; } };
