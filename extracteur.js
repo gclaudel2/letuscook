@@ -35,6 +35,40 @@
     try { const p = JSON.parse(localStorage.getItem(AI_PASS) || "null"); return p && p.code ? p : null; } catch { return null; }
   }
   const noAI = () => !!(APP && APP.noAI) && !userAiKey() && !aiPass();
+
+  // ── IA de l'iPhone (Apple Intelligence, sur l'appareil) : seulement dans l'app iPhone compatible ──
+  let appleStatus = (APP && APP.appleAI) || "unsupported";
+  window.LUC_appleAIStatus = (st) => { appleStatus = st; };
+  const AI_ENGINE = "zbc.aiEngine"; // "auto" (iPhone d'abord, puis Gemini), "apple", "gemini"
+  const aiEngine = () => { try { return localStorage.getItem(AI_ENGINE) || "auto"; } catch { return "auto"; } };
+  const appleAIOn = () => appleStatus === "available" && aiEngine() !== "gemini" && !!window.webkit?.messageHandlers?.letuscook;
+  const geminiOn = () => !noAI() && !(appleAIOn() && aiEngine() === "apple");
+  const appleWaiting = new Map();
+  window.LUC_appleAIDone = (id, res) => { const w = appleWaiting.get(id); if (w) { appleWaiting.delete(id); w(res); } };
+  /** Texte → recette brute (format des IA du relais) par le modèle de l'iPhone. 4 000 tokens au plus : on envoie la partie utile. */
+  function appleAIRecipe(text, title = "", source = "page", max = 6000) {
+    let t = String(text || "");
+    if (t.length > max) {
+      const at = t.search(/ingr[ée]dients?/i);
+      const start = at > 400 ? at - 300 : 0;
+      t = t.slice(start, start + max);
+    }
+    const id = Math.random().toString(36).slice(2);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { appleWaiting.delete(id); reject(new ExtractError("LLM_TIMEOUT", "L'IA de l'iPhone met trop de temps.")); }, 120000);
+      appleWaiting.set(id, (res) => {
+        clearTimeout(timer);
+        if (res && res.ok) resolve(res.recipe || { found: false });
+        else reject(new ExtractError((res && res.code) || "LLM_FAILED", (res && res.message) || "L'IA de l'iPhone n'a pas pu lire cette recette."));
+      });
+      window.webkit.messageHandlers.letuscook.postMessage({ type: "apple-ai", id, text: t, title: String(title || "").slice(0, 200), source });
+    });
+  }
+  /** Avec l'IA de l'iPhone ; texte trop long → nouvel essai plus court. */
+  async function appleRecipeFrom(text, title, source) {
+    try { return await appleAIRecipe(text, title, source); }
+    catch (err) { if (err.code === "TOO_LONG") return appleAIRecipe(text, title, source, 3500); throw err; }
+  }
   const WORKER_URL_KEY = "zbc.workerUrl"; // adresse du relais saisie dans les réglages (prioritaire)
 
   function readSetting(key) {
@@ -1192,7 +1226,7 @@
     return { recipe, complete: isComplete(recipe), meta, getText: () => extractMainText(doc) };
   }
 
-  const PROVIDER_NAMES = { gemini: "Gemini", mistral: "Mistral", anthropic: "Claude", openai: "ChatGPT" };
+  const PROVIDER_NAMES = { gemini: "Gemini", mistral: "Mistral", anthropic: "Claude", openai: "ChatGPT", apple: "l'IA de l'iPhone" };
 
   /** onProgress(message, état) est appelé à chaque étape (journal affiché dans l'appli). */
   async function extractRecipe(input, onProgress = () => {}) {
@@ -1220,6 +1254,29 @@
     }
 
     const hasPartial = !!partial && (partial.ingredients.length > 0 || partial.steps.length > 0);
+    if (appleAIOn()) { // IA de l'iPhone : gratuite, rien ne quitte le téléphone
+      const text = getText();
+      if (text.length >= CONFIG.MIN_TEXT_FOR_AI) {
+        log("Analyse par l'IA de l'iPhone (5 à 30 s)…", "run");
+        try {
+          const raw = await appleRecipeFrom(text, meta.title, "page");
+          let ai = raw && raw.found !== false ? aiToRecipe(raw, page.finalUrl || url, meta) : null;
+          if (ai && !ai.ingredients.length && !ai.steps.length) ai = null;
+          if (ai) {
+            ai.aiProvider = "apple";
+            log(`Recette extraite par l'IA de l'iPhone : ${ai.ingredients.length} ingrédients, ${ai.steps.length} étapes`, "ok");
+            return { recipe: partial ? mergeRecipes(partial, ai) : ai, warnings };
+          }
+          log("L'IA de l'iPhone n'a pas trouvé de recette dans la page", "warn");
+        } catch (err) {
+          log(err.message, "warn");
+        }
+      }
+      if (!geminiOn()) {
+        if (hasPartial) return { recipe: partial, warnings: ["Recette incomplète : vérifiez sur le site d'origine."] };
+        throw new ExtractError("NO_RECIPE", "Aucune recette trouvée sur cette page.");
+      }
+    }
     if (noAI()) { // app App Store sans clé IA personnelle : pas d'analyse par l'IA
       if (hasPartial) {
         log("Recette partielle conservée (lecture du texte)", "warn");
@@ -1926,6 +1983,10 @@
   window.ZBC = {
     CONFIG, ACCESS_CODE_KEY, WORKER_URL_KEY, getWorkerUrl, ExtractError, APP, USER_AI_KEY, USER_AI_CONSENT, userAiKey, checkUserAiKey,
     AI_PASS, aiPass,
+    AI_ENGINE, aiEngine, appleRecipeFrom, aiToRecipe,
+    get APPLE_AI() { return appleAIOn(); },
+    get APPLE_AI_STATUS() { return appleStatus; },
+    refreshAppleAI() { try { window.webkit?.messageHandlers?.letuscook?.postMessage({ type: "apple-ai-status" }); } catch { /* */ } },
     get NO_AI() { return noAI(); },
     callRelay: (path, body) => callWorker(path, body),
     extractRecipe, extractFromHtml, parseTargetUrl, searchRecipes, readPhotos, recipeFromText, photosToRecipeAI, analyzeUrl, previewImages, rememberImage, cachedImage, synthesize, refreshChefIndex, chefIndexStatus, chefIndexStale, setChefSourceEnabled, CHEF_CATALOGS, detectChefSource, addChefSource, removeChefSource, chefIndexItems, chefIndexCount, matchesQuery, queryWords, getSearchSites, saveSearchSites, resetSearchSites, rememberRemovedSite, normalizeHost, testSearchSite, DEFAULT_SEARCH_SITES,

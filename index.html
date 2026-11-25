@@ -837,6 +837,15 @@ window.applyTheme = function (name) {
       <input class="input" id="set-worker" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://zbc-relais.….workers.dev">
       <p>Laissez vide pour utiliser le relais prévu par l'appli (affiché en grisé). À remplir seulement pour en utiliser un autre.</p>
     </div>
+    <div class="group" id="apple-ai-group" hidden>
+      <span class="field-label">IA de l'iPhone</span>
+      <p id="apple-ai-status" role="status"></p>
+      <div id="ai-engine-row" class="segs" role="group" aria-label="IA utilisée" hidden>
+        <button type="button" class="seg" data-engine="auto">iPhone, puis Gemini</button>
+        <button type="button" class="seg" data-engine="apple">iPhone</button>
+        <button type="button" class="seg" data-engine="gemini">Gemini</button>
+      </div>
+    </div>
     <div class="group" id="ai-group" hidden>
       <label class="field-label" for="set-ai-key">IA personnelle <small class="muted-inline">facultatif</small></label>
       <p>Avec votre propre clé Gemini (gratuite chez Google), Let Us Cook lit aussi les pages de recettes difficiles et les recettes manuscrites en photo, et lit les étapes avec une voix naturelle.</p>
@@ -907,14 +916,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.33.1"></script>
-<script src="extracteur.js?v=2.33.1"></script>
+<script src="config.js?v=2.34.0"></script>
+<script src="extracteur.js?v=2.34.0"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.33.1";
+const APP_VERSION = "2.34.0";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -2350,7 +2359,17 @@ async function runPhotoExtraction(files, forceMode) {
   try {
     const { text, lines } = await ZBC.readPhotos(files, pushLog);
     state.ocrText = text;
-    const recipe = ZBC.recipeFromText(text, { lines });
+    let recipe = null;
+    if (ZBC.APPLE_AI && normSpaceUI(text).length >= 40) { // l'IA de l'iPhone remet en forme le texte lu (et corrige les fautes de lecture)
+      pushLog("Mise en forme par l'IA de l'iPhone (5 à 30 s)…", "run");
+      try {
+        const raw = await ZBC.appleRecipeFrom(text, "", "photo");
+        const ai = raw && raw.found !== false ? ZBC.aiToRecipe(raw, undefined, { siteName: "Photo" }) : null;
+        if (ai && ai.ingredients.length && ai.steps.length) { recipe = ai; recipe.extractedVia = "photo-apple"; recipe.aiProvider = "apple"; pushLog("Recette mise en forme par l'IA de l'iPhone", "ok"); }
+        else pushLog("L'IA de l'iPhone n'a pas reconnu la recette : découpage automatique", "warn");
+      } catch (err) { pushLog(err.message, "warn"); }
+    }
+    if (!recipe) recipe = ZBC.recipeFromText(text, { lines });
     if (!recipe) {
       pushLog("Pas de recette reconnue dans le texte lu", "error");
       throw new Error(normSpaceUI(text).length < 40
@@ -4385,6 +4404,8 @@ function openSettings() {
     $("#set-ai-consent").checked = localStorage.getItem(ZBC.USER_AI_CONSENT) === "oui";
   } catch { /* */ }
   drawAiStatus();
+  drawAppleAI();
+  ZBC.refreshAppleAI(); setTimeout(drawAppleAI, 400); // l'état peut changer (Apple Intelligence activée, modèle téléchargé)
   $("#gift-group").hidden = !ZBC.APP;
   $("#set-owner-code").value = store.get("zbc.ownerCode", "");
   $("#gift-list").replaceChildren();
@@ -4431,6 +4452,30 @@ $("#settings").addEventListener("close", () => {
   } catch { toast("Réglages non enregistrés (stockage indisponible)."); }
 });
 
+/* ── IA de l'iPhone (Apple Intelligence) ── */
+function drawAppleAI() {
+  const group = $("#apple-ai-group");
+  group.hidden = !ZBC.APP;
+  if (!ZBC.APP) return;
+  const st = ZBC.APPLE_AI_STATUS;
+  $("#apple-ai-status").textContent = {
+    available: "Disponible : Let Us Cook lit les pages de recettes difficiles et remet en forme vos photos de recettes avec l'IA intégrée à l'iPhone. Gratuit, hors ligne, rien ne quitte votre téléphone.",
+    notEnabled: "Activez Apple Intelligence dans Réglages › Apple Intelligence et Siri pour que Let Us Cook l'utilise (gratuit, rien ne quitte votre téléphone).",
+    notReady: "Apple Intelligence se télécharge sur votre iPhone : elle sera utilisée dès qu'elle sera prête.",
+    notEligible: "Cet iPhone ne prend pas en charge Apple Intelligence (iPhone 15 Pro ou plus récent). Vous pouvez utiliser Gemini ci-dessous.",
+  }[st] || "L'IA de l'iPhone demande iOS 26 et un iPhone compatible Apple Intelligence (iPhone 15 Pro ou plus récent).";
+  const both = st === "available";
+  $("#ai-engine-row").hidden = !both;
+  const cur = ZBC.aiEngine();
+  for (const b of $("#ai-engine-row").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.dataset.engine === cur));
+}
+$("#ai-engine-row").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-engine]"); if (!b) return;
+  try { localStorage.setItem(ZBC.AI_ENGINE, b.dataset.engine); } catch { /* */ }
+  drawAppleAI();
+  toast({ auto: "IA de l'iPhone d'abord, Gemini si besoin", apple: "IA de l'iPhone uniquement", gemini: "Gemini uniquement" }[b.dataset.engine]);
+});
+
 /* ── IA offerte par un ami (lien « IA ») et IA offerte à mes amis ── */
 function drawAiStatus() {
   const status = $("#ai-status");
@@ -4441,7 +4486,9 @@ function drawAiStatus() {
     status.replaceChildren(`IA offerte par ${pass.from || "un ami"} ✓ `, h("button", { type: "button", class: "btn small", onclick: () => {
       if (!confirm("Ne plus utiliser l'IA offerte ?")) return;
       try { localStorage.removeItem(ZBC.AI_PASS); } catch { /* */ }
-      drawAiStatus(); toast("IA offerte retirée");
+      drawAiStatus();
+  drawAppleAI();
+  ZBC.refreshAppleAI(); setTimeout(drawAppleAI, 400); // l'état peut changer (Apple Intelligence activée, modèle téléchargé) toast("IA offerte retirée");
     } }, "Ne plus l'utiliser"));
   } else status.textContent = "IA désactivée.";
 }
