@@ -527,6 +527,9 @@
   .mn-row .btn.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
   .mn-text { width: 100%; min-height: 52px; height: auto; padding: 12px 14px; font: inherit; font-size: 17px; line-height: 1.45; resize: none; }
 
+  .analysis { margin: 6px 0 18px; }
+  .analysis .segs { margin-top: 6px; }
+  .analysis .hint { margin-top: 8px; }
   .faim-card {
     display: flex; align-items: center; gap: 14px; width: 100%; margin: 16px 0 4px; padding: 14px 16px; text-align: left;
     border: 1.5px solid color-mix(in srgb, var(--accent) 55%, var(--line)); border-radius: var(--radius);
@@ -840,11 +843,6 @@ window.applyTheme = function (name) {
     <div class="group" id="apple-ai-group" hidden>
       <span class="field-label">IA de l'iPhone</span>
       <p id="apple-ai-status" role="status"></p>
-      <div id="ai-engine-row" class="segs" role="group" aria-label="IA utilisée" hidden>
-        <button type="button" class="seg" data-engine="auto">iPhone, puis Gemini</button>
-        <button type="button" class="seg" data-engine="apple">iPhone</button>
-        <button type="button" class="seg" data-engine="gemini">Gemini</button>
-      </div>
     </div>
     <div class="group" id="ai-group" hidden>
       <label class="field-label" for="set-ai-key">IA personnelle <small class="muted-inline">facultatif</small></label>
@@ -916,14 +914,14 @@ window.applyTheme = function (name) {
   </form>
 </dialog>
 
-<script src="config.js?v=2.34.1"></script>
-<script src="extracteur.js?v=2.34.1"></script>
+<script src="config.js?v=2.35.0"></script>
+<script src="extracteur.js?v=2.35.0"></script>
 <script>
 "use strict";
 
 /* ════════════ Version ════════════
  * À changer à chaque mise en ligne, en même temps que VERSION dans sw.js. */
-const APP_VERSION = "2.34.1";
+const APP_VERSION = "2.35.0";
 
 /* ════════════ Utilitaires ════════════ */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -2185,32 +2183,44 @@ function renderExtractPanel() {
     type: "file", accept: "image/*", multiple: true, hidden: true,
     onchange: (e) => { const files = [...e.target.files]; e.target.value = ""; if (files.length) runPhotoExtraction(files); },
   });
-  const mode = photoMode();
-  const modeBtn = (value, label) => h("button", {
-    type: "button", class: "seg", "aria-pressed": String(mode === value), disabled: state.loading,
-    onclick: () => { store.set("zbc.photoMode", value); renderHome(); },
-  }, label);
+  const modes = ZBC.analysisModes();
+  const mode = ZBC.analysisMode();
+  const MODE_LABEL = { none: "Sans IA", apple: "IA de l'iPhone", gemini: "Gemini" };
+  const modeBar = modes.length > 1 && h("div", { class: "analysis" },
+    h("span", { class: "field-label" }, "Analyse"),
+    h("div", { class: "segs", role: "group", "aria-label": "Analyse de la recette" }, modes.map((m) => h("button", {
+      type: "button", class: "seg", "aria-pressed": String(mode === m), disabled: state.loading,
+      onclick: () => { ZBC.setAnalysisMode(m); renderHome(); },
+    }, MODE_LABEL[m]))),
+    h("p", { class: "hint" }, {
+      none: "Lecture directe de la page ou de la photo, sans IA : idéal pour les sites bien construits et les textes imprimés.",
+      apple: "L'IA intégrée à l'iPhone complète la lecture : gratuite, et rien ne quitte votre téléphone.",
+      gemini: "Gemini (Google) lit les pages difficiles et même les recettes écrites à la main. La page ou la photo est envoyée à Google via le relais.",
+    }[mode]));
+  const appleHint = ZBC.APP && !modes.includes("apple") && {
+    notEnabled: "Pour l'analyse par l'IA de l'iPhone, activez Apple Intelligence dans Réglages › Apple Intelligence et Siri.",
+    notReady: "Apple Intelligence se télécharge sur votre iPhone : l'analyse par l'IA de l'iPhone sera bientôt proposée ici.",
+    oldApp: "Installez la dernière version de l'app depuis TestFlight pour l'analyse par l'IA de l'iPhone.",
+  }[ZBC.APPLE_AI_STATUS];
   const photo = h("div", { class: "photo-block" },
     h("div", { class: "or" }, h("span", {}, "ou")),
-    !ZBC.NO_AI && h("div", { class: "segs photo-mode", role: "group", "aria-label": "Lecture de la photo" },
-      modeBtn("iphone", "Sur le smartphone"), modeBtn("ia", "Par l'IA")),
     h("button", { class: "btn photo-btn", type: "button", disabled: state.loading, onclick: () => photoInput.click() },
       icon("camera"), state.loadingPhoto ? "Lecture de la photo…" : "Photo d'une recette"),
     photoInput,
-    h("p", { class: "hint" }, mode === "ia"
-      ? "Lue par l'IA (Gemini) : le meilleur résultat, même pour un cahier écrit à la main. La photo est envoyée à Google via votre relais ; Internet nécessaire."
-      : ZBC.NO_AI ? "Lue directement sur l'iPhone, sans rien envoyer : idéal pour un texte imprimé, page à plat, photo de face et bien éclairée."
-      : "Lue sur le smartphone, sans IA et sans rien envoyer : bien pour un texte imprimé, page à plat, photo de face et bien éclairée."),
     h("p", { class: "hint" }, "Livre, magazine, fiche ou cahier. Plusieurs photos si la recette tient sur 2 pages."));
+  const others = modes.filter((m) => m !== state.lastPhotoMode && m !== state.lastUrlMode);
+  const retryMode = state.lastError && (state.lastPhotos || state.lastUrl) ? (others.find((m) => m === "apple") || others.find((m) => m === "gemini")) : null;
 
   return h("section", { "aria-label": "Extraire une recette" },
+    modeBar,
+    appleHint && h("p", { class: "hint" }, appleHint),
     form,
     photo,
     state.lastError && h("div", { class: "notice error", role: "alert" }, state.lastError),
-    state.lastError && state.lastPhotos && !ZBC.NO_AI && h("button", {
+    retryMode && h("button", {
       class: "btn retry-photo", type: "button",
-      onclick: () => runPhotoExtraction(state.lastPhotos, state.lastPhotoMode === "ia" ? "iphone" : "ia"),
-    }, icon("camera"), state.lastPhotoMode === "ia" ? "Réessayer en lisant sur le smartphone" : "Réessayer avec l'IA"),
+      onclick: () => { ZBC.setAnalysisMode(retryMode); if (state.lastPhotos) runPhotoExtraction(state.lastPhotos); else runExtraction(state.lastUrl); },
+    }, icon(state.lastPhotos ? "camera" : "refresh"), `Réessayer avec ${MODE_LABEL[retryMode] === "Gemini" ? "Gemini" : "l'IA de l'iPhone"}`),
     state.lastError && state.ocrText && h("details", { class: "ocr-text" }, h("summary", {}, "Voir le texte lu sur la photo"), h("pre", {}, state.ocrText.trim())),
     renderLog(),
     h("p", { class: "hint" }, "Pour un lien, dans Safari : Partager › Copier, puis revenez ici et touchez le bouton Coller."),
@@ -2270,11 +2280,11 @@ async function runExtraction(raw) {
   const existing = findBySource(url);
   if (existing) { state.log = []; toast("Déjà dans votre carnet"); return go(`#/r/${encodeURIComponent(existing.id)}`); }
 
-  state.loading = true;
-  state.log = [];
+  const mode = ZBC.analysisMode();
+  Object.assign(state, { loading: true, log: [], lastUrlMode: mode, lastPhotos: null, lastPhotoMode: null, ocrText: "" });
   renderHome();
   try {
-    const { recipe, warnings } = await ZBC.extractRecipe(url, pushLog);
+    const { recipe, warnings } = await ZBC.extractRecipe(url, pushLog, { ai: mode });
     state.preview = recipe;
     state.previewWarnings = warnings;
     state.lastUrl = "";
@@ -2327,7 +2337,7 @@ function photoFull(file) {
 const photosOf = async (files) => (await Promise.all([...files].slice(0, 4).map(photoFull))).filter(Boolean);
 
 /** Photo(s) d'une recette → lecture du texte sur l'iPhone → recette pas à pas (aperçu, puis carnet). */
-const photoMode = () => (!ZBC.NO_AI && store.get("zbc.photoMode", "iphone") === "ia" ? "ia" : "iphone");
+
 
 async function runPhotoExtraction(files, forceMode) {
   if (state.loading) return;
@@ -2335,10 +2345,10 @@ async function runPhotoExtraction(files, forceMode) {
     state.lastError = "L'appli n'a pas fini de se mettre à jour : fermez-la complètement (balayez-la vers le haut) puis rouvrez-la.";
     return renderHome();
   }
-  const mode = forceMode || photoMode();
-  Object.assign(state, { loading: true, loadingPhoto: true, log: [], lastError: "", ocrText: "", lastPhotos: files, lastPhotoMode: mode });
+  const mode = forceMode || ZBC.analysisMode(); // none, apple ou gemini
+  Object.assign(state, { loading: true, loadingPhoto: true, log: [], lastError: "", ocrText: "", lastPhotos: files, lastPhotoMode: mode, lastUrlMode: null });
   renderHome();
-  if (mode === "ia") {
+  if (mode === "gemini") {
     try {
       const recipe = await ZBC.photosToRecipeAI(files, pushLog);
       recipe.image = await photoThumb(files[0]);
@@ -2360,7 +2370,7 @@ async function runPhotoExtraction(files, forceMode) {
     const { text, lines } = await ZBC.readPhotos(files, pushLog);
     state.ocrText = text;
     let recipe = null;
-    if (ZBC.APPLE_AI && normSpaceUI(text).length >= 40) { // l'IA de l'iPhone remet en forme le texte lu (et corrige les fautes de lecture)
+    if (mode === "apple" && normSpaceUI(text).length >= 40) { // l'IA de l'iPhone remet en forme le texte lu (et corrige les fautes de lecture)
       pushLog("Mise en forme par l'IA de l'iPhone (5 à 30 s)…", "run");
       try {
         const raw = await ZBC.appleRecipeFrom(text, "", "photo");
@@ -4459,23 +4469,13 @@ function drawAppleAI() {
   if (!ZBC.APP) return;
   const st = ZBC.APPLE_AI_STATUS;
   $("#apple-ai-status").textContent = {
-    available: "Disponible : Let Us Cook lit les pages de recettes difficiles et remet en forme vos photos de recettes avec l'IA intégrée à l'iPhone. Gratuit, hors ligne, rien ne quitte votre téléphone.",
+    available: "Disponible : choisissez « IA de l'iPhone » dans l'onglet Analyser. Gratuit, hors ligne, rien ne quitte votre téléphone.",
     notEnabled: "Activez Apple Intelligence dans Réglages › Apple Intelligence et Siri pour que Let Us Cook l'utilise (gratuit, rien ne quitte votre téléphone).",
     notReady: "Apple Intelligence se télécharge sur votre iPhone : elle sera utilisée dès qu'elle sera prête.",
     oldApp: "Pour utiliser l'IA intégrée à votre iPhone (gratuite, rien ne quitte le téléphone), installez la dernière version de l'app Let Us Cook depuis TestFlight.",
     notEligible: "Cet iPhone ne prend pas en charge Apple Intelligence (iPhone 15 Pro ou plus récent). Vous pouvez utiliser Gemini ci-dessous.",
   }[st] || "L'IA de l'iPhone demande iOS 26 et un iPhone compatible Apple Intelligence (iPhone 15 Pro ou plus récent).";
-  const both = st === "available";
-  $("#ai-engine-row").hidden = !both;
-  const cur = ZBC.aiEngine();
-  for (const b of $("#ai-engine-row").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.dataset.engine === cur));
 }
-$("#ai-engine-row").addEventListener("click", (e) => {
-  const b = e.target.closest("button[data-engine]"); if (!b) return;
-  try { localStorage.setItem(ZBC.AI_ENGINE, b.dataset.engine); } catch { /* */ }
-  drawAppleAI();
-  toast({ auto: "IA de l'iPhone d'abord, Gemini si besoin", apple: "IA de l'iPhone uniquement", gemini: "Gemini uniquement" }[b.dataset.engine]);
-});
 
 /* ── IA offerte par un ami (lien « IA ») et IA offerte à mes amis ── */
 function drawAiStatus() {
@@ -4487,9 +4487,7 @@ function drawAiStatus() {
     status.replaceChildren(`IA offerte par ${pass.from || "un ami"} ✓ `, h("button", { type: "button", class: "btn small", onclick: () => {
       if (!confirm("Ne plus utiliser l'IA offerte ?")) return;
       try { localStorage.removeItem(ZBC.AI_PASS); } catch { /* */ }
-      drawAiStatus();
-  drawAppleAI();
-  ZBC.refreshAppleAI(); setTimeout(drawAppleAI, 400); // l'état peut changer (Apple Intelligence activée, modèle téléchargé) toast("IA offerte retirée");
+      drawAiStatus(); toast("IA offerte retirée");
     } }, "Ne plus l'utiliser"));
   } else status.textContent = "IA désactivée.";
 }

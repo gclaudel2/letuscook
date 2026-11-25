@@ -39,10 +39,17 @@
   // ── IA de l'iPhone (Apple Intelligence, sur l'appareil) : seulement dans l'app iPhone compatible ──
   let appleStatus = (APP && APP.appleAI) || (APP ? "oldApp" : "unsupported"); // oldApp : app iPhone d'avant l'IA de l'iPhone
   window.LUC_appleAIStatus = (st) => { appleStatus = st; };
-  const AI_ENGINE = "zbc.aiEngine"; // "auto" (iPhone d'abord, puis Gemini), "apple", "gemini"
-  const aiEngine = () => { try { return localStorage.getItem(AI_ENGINE) || "auto"; } catch { return "auto"; } };
-  const appleAIOn = () => appleStatus === "available" && aiEngine() !== "gemini" && !!window.webkit?.messageHandlers?.letuscook;
-  const geminiOn = () => !noAI() && !(appleAIOn() && aiEngine() === "apple");
+  const appleAvailable = () => appleStatus === "available" && !!window.webkit?.messageHandlers?.letuscook;
+  /** Analyses proposées dans l'onglet Analyser : sans IA, IA de l'iPhone (si dispo), Gemini (si clé / accès / relais) */
+  const analysisModes = () => ["none", ...(appleAvailable() ? ["apple"] : []), ...(!noAI() ? ["gemini"] : [])];
+  const ANALYSIS_KEY = "zbc.analysis";
+  function analysisMode() {
+    const modes = analysisModes();
+    let m; try { m = localStorage.getItem(ANALYSIS_KEY); } catch { /* */ }
+    if (m && modes.includes(m)) return m;
+    return modes.includes("apple") ? "apple" : modes.includes("gemini") ? "gemini" : "none";
+  }
+  function setAnalysisMode(m) { try { localStorage.setItem(ANALYSIS_KEY, m); } catch { /* */ } }
   const appleWaiting = new Map();
   window.LUC_appleAIDone = (id, res) => { const w = appleWaiting.get(id); if (w) { appleWaiting.delete(id); w(res); } };
   /** Texte → recette brute (format des IA du relais) par le modèle de l'iPhone. 4 000 tokens au plus : on envoie la partie utile. */
@@ -1229,7 +1236,8 @@
   const PROVIDER_NAMES = { gemini: "Gemini", mistral: "Mistral", anthropic: "Claude", openai: "ChatGPT", apple: "l'IA de l'iPhone" };
 
   /** onProgress(message, état) est appelé à chaque étape (journal affiché dans l'appli). */
-  async function extractRecipe(input, onProgress = () => {}) {
+  async function extractRecipe(input, onProgress = () => {}, opts = {}) {
+    const mode = analysisModes().includes(opts.ai) ? opts.ai : analysisMode();
     const t0 = performance.now();
     const log = (message, status = "info") => {
       try { onProgress(message, status, Math.round(performance.now() - t0)); } catch { /* affichage */ }
@@ -1254,7 +1262,7 @@
     }
 
     const hasPartial = !!partial && (partial.ingredients.length > 0 || partial.steps.length > 0);
-    if (appleAIOn()) { // IA de l'iPhone : gratuite, rien ne quitte le téléphone
+    if (mode === "apple") { // IA de l'iPhone : gratuite, rien ne quitte le téléphone
       const text = getText();
       if (text.length >= CONFIG.MIN_TEXT_FOR_AI) {
         log("Analyse par l'IA de l'iPhone (5 à 30 s)…", "run");
@@ -1272,18 +1280,16 @@
           log(err.message, "warn");
         }
       }
-      if (!geminiOn()) {
-        if (hasPartial) return { recipe: partial, warnings: ["Recette incomplète : vérifiez sur le site d'origine."] };
-        throw new ExtractError("NO_RECIPE", "Aucune recette trouvée sur cette page.");
-      }
+      if (hasPartial) return { recipe: partial, warnings: ["Recette incomplète : vérifiez sur le site d'origine, ou réessayez avec une autre analyse."] };
+      throw new ExtractError("NO_RECIPE", "L'IA de l'iPhone n'a pas trouvé de recette sur cette page.");
     }
-    if (noAI()) { // app App Store sans clé IA personnelle : pas d'analyse par l'IA
+    if (mode !== "gemini") { // sans IA : ce que la lecture du texte a trouvé // app App Store sans clé IA personnelle : pas d'analyse par l'IA
       if (hasPartial) {
         log("Recette partielle conservée (lecture du texte)", "warn");
-        return { recipe: partial, warnings: ["Recette incomplète : cette page n'est pas lisible entièrement sans IA. Vérifiez sur le site d'origine."] };
+        return { recipe: partial, warnings: [analysisModes().length > 1 ? "Recette incomplète sans IA : réessayez avec une analyse par l'IA." : "Recette incomplète : cette page n'est pas lisible entièrement sans IA. Vérifiez sur le site d'origine."] };
       }
       log("Pas de recette lisible sur cette page", "error");
-      throw new ExtractError("NO_RECIPE", "Cette page ne contient pas de recette lisible automatiquement. Ouvrez-la sur le site d'origine.");
+      throw new ExtractError("NO_RECIPE", analysisModes().length > 1 ? "Pas de recette lisible sans IA sur cette page : réessayez avec une analyse par l'IA." : "Cette page ne contient pas de recette lisible automatiquement. Ouvrez-la sur le site d'origine.");
     }
     const text = getText();
     if (text.length < CONFIG.MIN_TEXT_FOR_AI) {
@@ -1983,8 +1989,8 @@
   window.ZBC = {
     CONFIG, ACCESS_CODE_KEY, WORKER_URL_KEY, getWorkerUrl, ExtractError, APP, USER_AI_KEY, USER_AI_CONSENT, userAiKey, checkUserAiKey,
     AI_PASS, aiPass,
-    AI_ENGINE, aiEngine, appleRecipeFrom, aiToRecipe,
-    get APPLE_AI() { return appleAIOn(); },
+    analysisModes, analysisMode, setAnalysisMode, appleRecipeFrom, aiToRecipe,
+    get APPLE_AI() { return appleAvailable(); },
     get APPLE_AI_STATUS() { return appleStatus; },
     refreshAppleAI() { try { window.webkit?.messageHandlers?.letuscook?.postMessage({ type: "apple-ai-status" }); } catch { /* */ } },
     get NO_AI() { return noAI(); },
